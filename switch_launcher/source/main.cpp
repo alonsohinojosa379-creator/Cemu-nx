@@ -303,7 +303,8 @@ static const Choice C_gridColumns[] = { {"3","3"}, {"4","4"}, {"5","5"}, {"6","6
 static const Choice C_gridRows[] = { {"1","1"}, {"2","2"}, {"3","3"} };
 static const Choice C_uiLanguage[] = { {"System","system"}, {"English","en"}, {"Français","fr"},
                                        {"Deutsch","de"}, {"Español","es"}, {"Italiano","it"},
-                                       {"Português","pt"} };
+                                       {"Português","pt"}, {"简体中文","zh-CN"},
+                                       {"繁體中文","zh-TW"} };
 
 enum { SCR_CPU, SCR_GRAPHICS, SCR_FRAMEGEN, SCR_AUDIO, SCR_OVERLAY, SCR_INPUT, SCR_ACCESSORIES, SCR_COUNT };
 
@@ -622,6 +623,7 @@ static bool readEnabledPacks(std::vector<CemuGraphicPack> &out) {
 static SDL_Window   *g_win = nullptr;
 static SDL_Renderer *g_ren = nullptr;
 static TTF_Font     *g_font = nullptr, *g_font_sm = nullptr, *g_font_big = nullptr;
+static PlSharedFontType g_requestedFontType = PlSharedFontType_Total;
 static SDL_Texture  *g_logo = nullptr;
 static int SW = 1280, SH = 720;
 static bool g_romfsReady = false;
@@ -1272,6 +1274,60 @@ static void makeGlyphs(){
   g_gUpDown=makeGlyph("^ v",true);
 }
 
+static void destroyGlyphs(){
+  SDL_Texture **glyphs[] = { &g_gA, &g_gB, &g_gX, &g_gY, &g_gPlus, &g_gMinus,
+                            &g_gL, &g_gR, &g_gLeftRight, &g_gUpDown };
+  for(SDL_Texture **glyph:glyphs){
+    if(*glyph) SDL_DestroyTexture(*glyph);
+    *glyph=nullptr;
+  }
+}
+
+static PlSharedFontType requestedLauncherFontType(){
+  const std::string_view language=LauncherLocalization::ActiveLanguage();
+  if(language=="zh-CN") return PlSharedFontType_ChineseSimplified;
+  if(language=="zh-TW") return PlSharedFontType_ChineseTraditional;
+  return PlSharedFontType_Standard;
+}
+
+static bool openLauncherFontSet(PlSharedFontType type,TTF_Font *&small,TTF_Font *&normal,TTF_Font *&large){
+  PlFontData data{};
+  if(R_FAILED(plGetSharedFontByType(&data,type))||!data.address||!data.size||data.size>INT_MAX) return false;
+  const int scale=SH>=1080?1:0;
+  auto openFont=[&](int size)->TTF_Font*{
+    SDL_RWops *rw=SDL_RWFromConstMem(data.address,(int)data.size);
+    return rw?TTF_OpenFontRW(rw,1,size):nullptr;
+  };
+  small=openFont(scale?26:20);
+  normal=openFont(scale?32:26);
+  large=openFont(scale?52:40);
+  if(small&&normal&&large) return true;
+  if(small) TTF_CloseFont(small);
+  if(normal) TTF_CloseFont(normal);
+  if(large) TTF_CloseFont(large);
+  small=normal=large=nullptr;
+  return false;
+}
+
+static bool loadLauncherFonts(){
+  const PlSharedFontType requested=requestedLauncherFontType();
+  if(g_requestedFontType==requested&&g_font_sm&&g_font&&g_font_big) return true;
+  TTF_Font *small=nullptr,*normal=nullptr,*large=nullptr;
+  if(!openLauncherFontSet(requested,small,normal,large)){
+    if(requested==PlSharedFontType_Standard||
+       !openLauncherFontSet(PlSharedFontType_Standard,small,normal,large)) return false;
+  }
+  clearTextCaches();
+  destroyGlyphs();
+  if(g_font_sm) TTF_CloseFont(g_font_sm);
+  if(g_font) TTF_CloseFont(g_font);
+  if(g_font_big) TTF_CloseFont(g_font_big);
+  g_font_sm=small; g_font=normal; g_font_big=large;
+  g_requestedFontType=requested;
+  makeGlyphs();
+  return true;
+}
+
 enum FootAct { FA_NONE, FA_LAUNCH, FA_SORT, FA_OPTIONS, FA_SETTINGS, FA_FILTER, FA_PAGEL, FA_PAGER, FA_QUIT };
 struct FootItem { SDL_Texture *glyph; const char *label; int act; };
 static SDL_Rect g_footHit[10]; static int g_footAct[10]; static int g_footN=0;
@@ -1771,6 +1827,7 @@ static bool hasGameExt(const char *n) {
 static std::string join(const std::string &b, const std::string &n) { std::string r=b; if(!r.empty()&&r.back()=='/') r.pop_back(); return r+"/"+n; }
 static std::string foldedKey(std::string key);
 static bool pathAtOrBelow(const std::string &path,const std::string &root);
+static bool isUsbStoragePath(const std::string &path);
 
 static std::string normalizeLocationPath(const std::string &input) {
   std::string path=trim(input);
@@ -1808,64 +1865,296 @@ static std::string usbStableIdForPath(const std::string &path) {
   return {};
 }
 
-static std::vector<std::string> loadGameSources() {
-  std::vector<std::string> paths;
+struct GameSourceRecord {
+  std::string storedPath;
+  std::string runtimePath;
+  std::string stableId;
+  std::string physicalId;
+  std::string relative;
+  bool relativeValid=true;
+};
+
+static bool normalizeUsbRelative(const std::string &input,std::string &output) {
+  std::string value=input;
+  std::replace(value.begin(),value.end(),'\\','/');
+  output.clear();
+  size_t offset=0;
+  while(offset<=value.size()){
+    size_t slash=value.find('/',offset);
+    std::string component=value.substr(offset,slash==std::string::npos?std::string::npos:slash-offset);
+    if(component=="..") return false;
+    if(!component.empty()&&component!="."){
+      if(!output.empty()) output+='/';
+      output+=component;
+    }
+    if(slash==std::string::npos) break;
+    offset=slash+1;
+  }
+  return true;
+}
+
+static std::string unresolvedUsbSource(const std::string &stableId,const std::string &relative) {
+  return "usb-id:"+stableId+(relative.empty()?std::string{}:"/"+relative);
+}
+
+static bool isUnresolvedUsbSource(const std::string &path) {
+  return path.rfind("usb-id:",0)==0;
+}
+
+static bool hasUnresolvedUsbSource(const std::vector<std::string> &paths) {
+  return std::any_of(paths.begin(),paths.end(),isUnresolvedUsbSource);
+}
+
+static bool parseUnresolvedUsbSource(const std::string &path,std::string &stableId,
+                                     std::string &relative) {
+  static constexpr const char *PREFIX="usb-id:";
+  if(path.rfind(PREFIX,0)!=0) return false;
+  const size_t slash=path.find('/',strlen(PREFIX));
+  stableId=path.substr(strlen(PREFIX),slash==std::string::npos?std::string::npos:slash-strlen(PREFIX));
+  const std::string rawRelative=slash==std::string::npos?std::string{}:path.substr(slash+1);
+  return !stableId.empty()&&normalizeUsbRelative(rawRelative,relative);
+}
+
+static bool directoryExists(const std::string &path) {
+  struct stat info{};
+  return stat(path.c_str(),&info)==0&&S_ISDIR(info.st_mode);
+}
+
+static std::string gameSourceIdentity(const GameSourceRecord &record) {
+  if(!record.stableId.empty()) return "usb:"+foldedKey(record.stableId)+"/"+foldedKey(record.relative);
+  return pathIdentity(record.runtimePath.empty()?record.storedPath:record.runtimePath);
+}
+
+static bool bindMountedUsbPath(const std::string &path,
+                               const std::vector<SwitchStorage::Location> &locations,
+                               std::string &stableId,std::string &physicalId,
+                               std::string &relative) {
+  const std::string normalizedPath=normalizeLocationPath(path);
+  for(const auto &location:locations){
+    const std::string root=normalizeLocationPath(location.path);
+    if(!pathAtOrBelow(normalizedPath,root)) continue;
+    std::string rawRelative=normalizedPath.substr(std::min(normalizedPath.size(),root.size()));
+    while(!rawRelative.empty()&&rawRelative.front()=='/') rawRelative.erase(rawRelative.begin());
+    if(!normalizeUsbRelative(rawRelative,relative)) return false;
+    stableId=location.id;
+    physicalId=location.physicalId;
+    return true;
+  }
+  return false;
+}
+
+static std::vector<GameSourceRecord> loadSavedGameSourceRecords() {
+  std::vector<GameSourceRecord> records;
   int count=std::max(0,std::min(16,atoi(storeGet(g_global,"Wrapper/GamePathCount","1"))));
   for(int i=0;i<count;i++){
-    std::string key="Wrapper/GamePath"+std::to_string(i);
-    std::string path=normalizeLocationPath(storeGet(g_global,key.c_str(),i==0?DEF_GAMEDIR:""));
-    const std::string stableKey="Wrapper/GamePathStable"+std::to_string(i);
-    const std::string relativeKey="Wrapper/GamePathRelative"+std::to_string(i);
-    const std::string stableId=storeGet(g_global,stableKey.c_str(),"");
-    if(!stableId.empty()){
-      const std::string root=SwitchStorage::ResolveUsbPath(stableId);
-      // A stored ums alias is never authoritative once a stable binding
-      // exists. If that disk is offline, omit the source rather than scanning
-      // an unrelated disk that reused the old alias.
-      if(root.empty()) continue;
-      path=normalizeLocationPath(root+storeGet(g_global,relativeKey.c_str(),""));
-    }
-    if(!path.empty()) paths.push_back(std::move(path));
+    const std::string prefix="Wrapper/GamePath"+std::to_string(i);
+    GameSourceRecord record;
+    record.storedPath=normalizeLocationPath(storeGet(g_global,prefix.c_str(),i==0?DEF_GAMEDIR:""));
+    record.runtimePath=record.storedPath;
+    record.stableId=storeGet(g_global,("Wrapper/GamePathStable"+std::to_string(i)).c_str(),"");
+    record.physicalId=storeGet(g_global,("Wrapper/GamePathPhysical"+std::to_string(i)).c_str(),"");
+    const std::string rawRelative=storeGet(g_global,("Wrapper/GamePathRelative"+std::to_string(i)).c_str(),"");
+    record.relativeValid=normalizeUsbRelative(rawRelative,record.relative);
+    if(!record.storedPath.empty()||!record.stableId.empty()) records.push_back(std::move(record));
   }
+  return records;
+}
+
+static void persistGameSourceRecords(const std::vector<GameSourceRecord> &input) {
+  std::vector<GameSourceRecord> records;
   std::unordered_set<std::string> seen;
-  paths.erase(std::remove_if(paths.begin(),paths.end(),[&](const std::string &path){
-    return !seen.insert(pathIdentity(path)).second;
-  }),paths.end());
+  for(const auto &entry:input){
+    GameSourceRecord record=entry;
+    if(record.storedPath.empty()&&!isUnresolvedUsbSource(record.runtimePath))
+      record.storedPath=normalizeLocationPath(record.runtimePath);
+    const std::string identity=gameSourceIdentity(record);
+    if(identity.empty()||!seen.insert(identity).second||records.size()>=16) continue;
+    records.push_back(std::move(record));
+  }
+  storeRemovePrefix(g_global,"Wrapper/GamePath");
+  storeSet(g_global,"Wrapper/GamePathCount",std::to_string(records.size()).c_str());
+  for(size_t index=0;index<records.size();index++){
+    const std::string pathKey="Wrapper/GamePath"+std::to_string(index);
+    storeSet(g_global,pathKey.c_str(),records[index].storedPath.c_str());
+    if(!records[index].stableId.empty()){
+      storeSet(g_global,("Wrapper/GamePathStable"+std::to_string(index)).c_str(),records[index].stableId.c_str());
+      if(!records[index].physicalId.empty())
+        storeSet(g_global,("Wrapper/GamePathPhysical"+std::to_string(index)).c_str(),records[index].physicalId.c_str());
+      storeSet(g_global,("Wrapper/GamePathRelative"+std::to_string(index)).c_str(),records[index].relative.c_str());
+    }
+  }
+}
+
+static bool resolveStableGameSource(GameSourceRecord &record,
+                                    const std::vector<SwitchStorage::Location> &locations,
+                                    bool allowRebind,bool &persistChanged) {
+  if(record.stableId.empty()) return false;
+  if(!record.relativeValid){
+    record.runtimePath=unresolvedUsbSource(record.stableId,{});
+    return false;
+  }
+  const auto stable=std::find_if(locations.begin(),locations.end(),[&](const auto &location){
+    return location.id==record.stableId;
+  });
+  if(stable!=locations.end()){
+    const std::string root=normalizeLocationPath(stable->path);
+    const std::string candidate=normalizeLocationPath(root+record.relative);
+    if(pathAtOrBelow(candidate,root)&&directoryExists(candidate)){
+      record.runtimePath=candidate;
+      if(pathIdentity(record.storedPath)!=pathIdentity(candidate)){
+        record.storedPath=candidate;
+        persistChanged=true;
+      }
+      if(record.physicalId!=stable->physicalId){
+        record.physicalId=stable->physicalId;
+        persistChanged=true;
+      }
+      return true;
+    }
+    record.runtimePath=unresolvedUsbSource(record.stableId,record.relative);
+    return false;
+  }
+  if(allowRebind){
+    const SwitchStorage::Location *physicalMatch=nullptr;
+    std::string physicalPath;
+    if(!record.physicalId.empty()) for(const auto &location:locations){
+      if(location.physicalId!=record.physicalId) continue;
+      const std::string root=normalizeLocationPath(location.path);
+      const std::string candidate=normalizeLocationPath(root+record.relative);
+      if(!pathAtOrBelow(candidate,root)||!directoryExists(candidate)) continue;
+      if(physicalMatch){ physicalMatch=nullptr; physicalPath.clear(); break; }
+      physicalMatch=&location;
+      physicalPath=candidate;
+    }
+    if(physicalMatch){
+      record.stableId=physicalMatch->id;
+      record.storedPath=physicalPath;
+      record.runtimePath=physicalPath;
+      persistChanged=true;
+      return true;
+    }
+    const SwitchStorage::Location *match=nullptr;
+    std::string matchedPath;
+    for(const auto &location:locations){
+      const std::string root=normalizeLocationPath(location.path);
+      const std::string candidate=normalizeLocationPath(root+record.relative);
+      if(!pathAtOrBelow(candidate,root)||!directoryExists(candidate)) continue;
+      if(match){ match=nullptr; matchedPath.clear(); break; }
+      match=&location;
+      matchedPath=candidate;
+    }
+    if(match){
+      record.stableId=match->id;
+      record.physicalId=match->physicalId;
+      record.storedPath=matchedPath;
+      record.runtimePath=matchedPath;
+      persistChanged=true;
+      return true;
+    }
+  }
+  record.runtimePath=unresolvedUsbSource(record.stableId,record.relative);
+  return false;
+}
+
+static std::vector<GameSourceRecord> resolvedGameSourceRecords(bool allowRebind,
+                                                               bool *persistChangedOutput=nullptr) {
+  std::vector<GameSourceRecord> records=loadSavedGameSourceRecords();
+  const auto locations=SwitchStorage::ListUsbLocations();
+  bool persistChanged=false;
+  std::vector<GameSourceRecord> resolved;
+  std::unordered_set<std::string> seen;
+  for(auto &record:records){
+    if(!record.stableId.empty()){
+      resolveStableGameSource(record,locations,allowRebind,persistChanged);
+    } else if(allowRebind&&isUsbStoragePath(record.storedPath)){
+      std::string stableId,physicalId,relative;
+      if(directoryExists(record.storedPath)&&
+         bindMountedUsbPath(record.storedPath,locations,stableId,physicalId,relative)){
+        record.stableId=std::move(stableId);
+        record.physicalId=std::move(physicalId);
+        record.relative=std::move(relative);
+        record.relativeValid=true;
+        record.runtimePath=record.storedPath;
+        persistChanged=true;
+      } else if(!directoryExists(record.storedPath)){
+        const size_t colon=record.storedPath.find(':');
+        const std::string rawRelative=colon==std::string::npos?std::string{}:record.storedPath.substr(colon+1);
+        record.relativeValid=normalizeUsbRelative(rawRelative,record.relative);
+        const SwitchStorage::Location *match=nullptr;
+        std::string matchedPath;
+        if(record.relativeValid) for(const auto &location:locations){
+          const std::string root=normalizeLocationPath(location.path);
+          const std::string candidate=normalizeLocationPath(root+record.relative);
+          if(!pathAtOrBelow(candidate,root)||!directoryExists(candidate)) continue;
+          if(match){ match=nullptr; matchedPath.clear(); break; }
+          match=&location;
+          matchedPath=candidate;
+        }
+        if(match){
+          record.stableId=match->id;
+          record.physicalId=match->physicalId;
+          record.storedPath=matchedPath;
+          record.runtimePath=matchedPath;
+          persistChanged=true;
+        }
+      }
+    }
+    const std::string identity=gameSourceIdentity(record);
+    if(identity.empty()||!seen.insert(identity).second){
+      if(allowRebind) persistChanged=true;
+      continue;
+    }
+    resolved.push_back(std::move(record));
+  }
+  if(persistChangedOutput) *persistChangedOutput=persistChanged;
+  return resolved;
+}
+
+static std::vector<std::string> loadGameSources() {
+  std::vector<std::string> paths;
+  for(auto &record:resolvedGameSourceRecords(false))
+    if(!record.runtimePath.empty()) paths.push_back(std::move(record.runtimePath));
   return paths;
 }
 
 static void saveGameSources(const std::vector<std::string> &input) {
-  std::vector<std::string> paths;
+  const auto existing=resolvedGameSourceRecords(false);
+  const auto locations=SwitchStorage::ListUsbLocations();
+  std::vector<GameSourceRecord> records;
   std::unordered_set<std::string> seen;
   for(const auto &entry:input){
-    std::string path=normalizeLocationPath(entry);
-    if(!path.empty() && seen.insert(pathIdentity(path)).second && paths.size()<16) paths.push_back(std::move(path));
-  }
-  struct SourceBinding { std::string stableId,relative; };
-  std::vector<SourceBinding> bindings(paths.size());
-  const auto usbLocations=SwitchStorage::ListUsbLocations();
-  for(size_t i=0;i<paths.size();i++){
-    for(const auto &location:usbLocations){
-      const std::string root=normalizeLocationPath(location.path);
-      if(pathAtOrBelow(paths[i],root)){
-        bindings[i].stableId=location.id;
-        bindings[i].relative=paths[i].substr(root.size());
-        break;
+    GameSourceRecord record;
+    record.runtimePath=normalizeLocationPath(entry);
+    if(record.runtimePath.empty()) continue;
+    if(parseUnresolvedUsbSource(record.runtimePath,record.stableId,record.relative)){
+      const auto old=std::find_if(existing.begin(),existing.end(),[&](const auto &candidate){
+        return candidate.stableId==record.stableId&&foldedKey(candidate.relative)==foldedKey(record.relative);
+      });
+      if(old!=existing.end()){
+        record.storedPath=old->storedPath;
+        record.physicalId=old->physicalId;
+      }
+    } else {
+      record.storedPath=record.runtimePath;
+      if(!directoryExists(record.runtimePath)||
+         !bindMountedUsbPath(record.runtimePath,locations,record.stableId,record.physicalId,record.relative)){
+        const auto old=std::find_if(existing.begin(),existing.end(),[&](const auto &candidate){
+          return pathIdentity(candidate.runtimePath)==pathIdentity(record.runtimePath)||
+                 pathIdentity(candidate.storedPath)==pathIdentity(record.runtimePath);
+        });
+        if(old!=existing.end()){
+          record.stableId=old->stableId;
+          record.physicalId=old->physicalId;
+          record.relative=old->relative;
+          record.relativeValid=old->relativeValid;
+        }
       }
     }
+    const std::string identity=gameSourceIdentity(record);
+    if(identity.empty()||!seen.insert(identity).second||records.size()>=16) continue;
+    records.push_back(std::move(record));
   }
-  storeRemovePrefix(g_global,"Wrapper/GamePath");
-  storeSet(g_global,"Wrapper/GamePathCount",std::to_string(paths.size()).c_str());
-  for(size_t i=0;i<paths.size();i++){
-    std::string key="Wrapper/GamePath"+std::to_string(i);
-    storeSet(g_global,key.c_str(),paths[i].c_str());
-    if(!bindings[i].stableId.empty()){
-      const std::string stableKey="Wrapper/GamePathStable"+std::to_string(i);
-      const std::string relativeKey="Wrapper/GamePathRelative"+std::to_string(i);
-      storeSet(g_global,stableKey.c_str(),bindings[i].stableId.c_str());
-      storeSet(g_global,relativeKey.c_str(),bindings[i].relative.c_str());
-    }
-  }
+  persistGameSourceRecords(records);
 }
 
 static std::vector<std::string> loadFavoriteFolders() {
@@ -2432,6 +2721,7 @@ static void libraryScanWorker(const std::shared_ptr<LibraryScanState> &state,
   };
   for(const std::string &source:sources){
     if(state->cancel.load()) break;
+    if(isUnresolvedUsbSource(source)) continue;
     const std::string sourceStorageId=usbStableIdForPath(source);
     DIR *directory=opendir(source.c_str());
     if(!directory) continue;
@@ -3533,25 +3823,27 @@ static bool hasConfiguredUsbBinding() {
 }
 
 static bool refreshConfiguredUsbSources(std::vector<std::string> &paths) {
-  // Resolve every saved stable binding from one fresh snapshot. This two-phase
-  // replacement also handles two disks swapping ums aliases without one
-  // source overwriting or deduplicating the other.
-  const std::vector<std::string> resolved=loadGameSources();
+  // Keep every configured source alive while its disk is unavailable, and
+  // resolve all bindings from one snapshot so swapped ums aliases cannot
+  // overwrite one another. If a drive's reported identity changed, only
+  // rebind when exactly one mounted volume contains the saved relative path.
+  bool persistChanged=false;
+  const auto records=resolvedGameSourceRecords(true,&persistChanged);
+  std::vector<std::string> resolved;
+  resolved.reserve(records.size());
+  for(const auto &record:records) if(!record.runtimePath.empty()) resolved.push_back(record.runtimePath);
   const bool changed=resolved!=paths;
   paths=resolved;
+  if(persistChanged){
+    persistGameSourceRecords(records);
+    storeSave(g_global,LAUNCHER_INI);
+  }
   return changed;
 }
 
 static void renderUsbForwarderWait() {
-  clearUiBackground();
-  const int panelWidth=720,panelHeight=220;
-  const int panelX=(SW-panelWidth)/2,panelY=(SH-panelHeight)/2;
-  glassPanel(panelX,panelY,panelWidth,panelHeight);
-  border(panelX,panelY,panelWidth,panelHeight,3,COL_SEL);
-  drawStaticTextC(g_font_big,SW/2,panelY+42,"Connecting USB storage",COL_SEL);
-  drawStaticTextC(g_font,SW/2,panelY+108,"Waiting for the game drive...",COL_TXT);
-  drawStaticTextC(g_font_sm,SW/2,panelY+150,"The game will start automatically",COL_DIM);
-  drawLocalizedFooter("B  Cancel",panelY+190);
+  SDL_SetRenderDrawColor(g_ren,0,0,0,255);
+  SDL_RenderClear(g_ren);
   SDL_RenderPresent(g_ren);
 }
 
@@ -3999,7 +4291,7 @@ static int dropdown(const char *title, const char *const *labels, int n, int cur
   int vis = (SH - 200) / rowH; if (vis < 1) vis = 1; if (vis > n) vis = n;
   beginScreenFx();
   for (;;) {
-    if (!beginUiFrame()) return cur;
+    if (!beginUiFrame()) return -1;
     SDL_Event e;
     navRepeat();
     while (pollUiEvent(e)) {
@@ -4014,7 +4306,7 @@ static int dropdown(const char *title, const char *const *labels, int n, int cur
         case SDL_CONTROLLER_BUTTON_DPAD_UP:   sel=(sel+n-1)%n; break;
         case SDL_CONTROLLER_BUTTON_DPAD_DOWN: sel=(sel+1)%n;   break;
         case BTN_CONFIRM: return sel;
-        case BTN_CANCEL:  return cur;
+        case BTN_CANCEL:  return -1;
       }
       if(sel<top) top=sel;
       if(sel>=top+vis) top=sel-vis+1;
@@ -4379,6 +4671,7 @@ static void launcherSettingsScreen() {
   int sel=std::max(0,std::min(savedSelection,selectionCount-1)),top=std::max(0,savedTop);
   auto applyChange=[&](){
     LauncherLocalization::Initialize(storeGet(g_global,"Wrapper/Language","system"));
+    if(!loadLauncherFonts()) toast("Could not load the selected language font");
     applyLauncherAppearance();
     uiAudioSetEnabled(strcmp(storeGet(g_global,"Wrapper/UiSounds","true"),"false")!=0);
   };
@@ -4777,6 +5070,11 @@ static void libraryStorageScreen() {
   constexpr int startY=126;
   int sel=std::max(0,std::min(savedSelection,rowCount-1));
   size_t installedCount = cemu_scanInstalledComponents(std::string(DATA_DIR) + "/mlc01").size();
+  // Resolving game sources stats every configured root, so a USB folder costs
+  // a synchronous device round trip. Refresh it when a submenu can have
+  // changed it instead of once per rendered frame.
+  size_t folderCount=loadGameSources().size();
+  auto shares=loadSmbSharesFromStore();
   auto openRow=[&](){
     if(sel==0) gameSourcesScreen();
     else if(sel==1) runFileManager();
@@ -4785,6 +5083,8 @@ static void libraryStorageScreen() {
     else if(sel==4) installedContentScreen();
     else doInstallFlow();
     installedCount = cemu_scanInstalledComponents(std::string(DATA_DIR) + "/mlc01").size();
+    folderCount=loadGameSources().size();
+    shares=loadSmbSharesFromStore();
     beginScreenFx();
   };
   beginScreenFx();
@@ -4818,10 +5118,8 @@ static void libraryStorageScreen() {
     fillRect(colX,(int)g_hy,colW,rowHeight-4,COL_FOCUS);
     fillRect(colX,(int)g_hy,5,rowHeight-4,COL_SEL);
 
-    auto shares=loadSmbSharesFromStore();
     size_t mounted=0;
     for(const auto &share:shares) if(SwitchStorage::IsSmbMounted(share.id)) mounted++;
-    size_t folderCount=loadGameSources().size();
     std::string folderValue=std::to_string(folderCount)+(folderCount==1?" folder":" folders");
     std::string smbValue=std::to_string(mounted)+" / "+std::to_string(shares.size())+" connected";
     std::string installedValue = std::to_string(installedCount) +
@@ -6314,8 +6612,9 @@ static bool pickIcon(Game &g, char *outPath, size_t outSize) {
 static void forwarderWizard(Game &g) {
   const int ix=110, iy=176, isz=280;
   const int rx=ix+isz+70; int rw=SW-rx-90;
-  const int nameY=220, createY=340, fieldH=64, createH=58;
+  const int nameY=196, authY=290, createY=406, fieldH=64, createH=58;
   char name[256]; snprintf(name,sizeof(name),"%s",g.title.c_str());
+  char author[128]; snprintf(author,sizeof(author),"%s","naga");
   char icon[300]={0};
   { struct stat st; std::string cp=existingCoverPath(g);
     if(stat(cp.c_str(),&st)==0) snprintf(icon,sizeof(icon),"%s",cp.c_str());
@@ -6338,7 +6637,7 @@ static void forwarderWizard(Game &g) {
     drawStaticTextC(g_font, SW/2, SH/2, "Building + installing forwarder...", COL_TXT);
     SDL_RenderPresent(g_ren);
     appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
-    char err[256]={0}; bool ok=forwarder_create(g.key,g.legacyKey,name,icon,err,sizeof(err));
+    char err[256]={0}; bool ok=forwarder_create(g.key,g.legacyKey,name,author,icon,err,sizeof(err));
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
     if(ok){ toastStatic("HOME shortcut installed"); done=true; }
     else modalMessageStatic("Shortcut failed", { std::string(err[0]?err:"Unknown error") });
@@ -6347,6 +6646,7 @@ static void forwarderWizard(Game &g) {
   auto activate=[&](){
     if(sel==0){ char p[300]; if(pickIcon(g,p,sizeof(p))){ snprintf(icon,sizeof(icon),"%s",p); if(iconTex)SDL_DestroyTexture(iconTex); iconTex=loadScaledTexture(icon,isz,isz); } beginScreenFx(); }
     else if(sel==1) edit("Shortcut name", name, sizeof(name));
+    else if(sel==2) edit("Author", author, sizeof(author));
     else build();
   };
 
@@ -6359,7 +6659,8 @@ static void forwarderWizard(Game &g) {
         if(tk==TOUCH_TAP){
           if(tx>=ix&&tx<ix+isz&&ty>=iy&&ty<iy+isz){ sel=0; activate(); }
           else if(ty>=nameY-6&&ty<nameY+fieldH){ sel=1; activate(); }
-          else if(ty>=createY-6&&ty<createY+createH){ sel=2; activate(); }
+          else if(ty>=authY-6&&ty<authY+fieldH){ sel=2; activate(); }
+          else if(ty>=createY-6&&ty<createY+createH){ sel=3; activate(); }
           else if(ty>=SH-40) done=true;
           continue;
         }
@@ -6368,8 +6669,8 @@ static void forwarderWizard(Game &g) {
       switch(e.cbutton.button){
         case SDL_CONTROLLER_BUTTON_DPAD_LEFT:  sel=0; break;
         case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: if(sel==0) sel=1; break;
-        case SDL_CONTROLLER_BUTTON_DPAD_UP:    sel=(sel==0)?2:sel-1; break;
-        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  sel=(sel==0)?1:(sel==2?0:2); break;
+        case SDL_CONTROLLER_BUTTON_DPAD_UP:    sel=(sel==0)?3:(sel==1?3:sel-1); break;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  sel=(sel==0)?1:(sel==3?1:sel+1); break;
         case BTN_CONFIRM: activate(); break;
         case BTN_CANCEL:  done=true; break;
       }
@@ -6386,7 +6687,8 @@ static void forwarderWizard(Game &g) {
       drawText(g_font_sm, rx, y, label, cur?COL_VAL:COL_DIM);
       drawScrollTextL(g_font, rx, y+26, rw-8, val, cur?COL_VAL:COL_TXT); };
     field(1,nameY,"Name",name);
-    { bool cur=sel==2;
+    field(2,authY,"Author",author);
+    { bool cur=sel==3;
       fillRect(rx-10,createY-6,rw+20,createH, cur?(SDL_Color){44,86,44,240}:(SDL_Color){30,46,32,200});
       if(cur) fillRect(rx-10,createY-6,5,createH,COL_SEL);
       drawStaticTextC(g_font, rx+rw/2, createY+12, "Create shortcut", cur?COL_VAL:(SDL_Color){150,225,150,255}); }
@@ -6851,10 +7153,13 @@ static bool ensureEmu() {
     written += (long long)n;
     int pct = (int)((unsigned __int128)written * 100 / sourceStat.st_size);
     if (pct != lastPct) {
-      if(!beginUiFrame()){ ok=false; break; }
-      SDL_Event event; while(pollUiEvent(event)) {}
-      if(g_exitRequested){ ok=false; break; }
-      drawSetupProgress(pct, "Preparing emulator..."); lastPct = pct;
+      if(g_sdlReady){
+        if(!beginUiFrame()){ ok=false; break; }
+        SDL_Event event; while(pollUiEvent(event)) {}
+        if(g_exitRequested){ ok=false; break; }
+        drawSetupProgress(pct, "Preparing emulator...");
+      }
+      lastPct = pct;
     }
   }
   if (ferror(in)) ok = false;
@@ -7078,12 +7383,7 @@ static void cleanupLauncher() {
     if (g_flag[i]) SDL_DestroyTexture(g_flag[i]);
     g_flag[i] = nullptr;
   }
-  SDL_Texture **glyphs[] = { &g_gA, &g_gB, &g_gX, &g_gY, &g_gPlus, &g_gMinus,
-                            &g_gL, &g_gR, &g_gLeftRight, &g_gUpDown };
-  for (SDL_Texture **glyph : glyphs) {
-    if (*glyph) SDL_DestroyTexture(*glyph);
-    *glyph = nullptr;
-  }
+  destroyGlyphs();
   if (g_logo) SDL_DestroyTexture(g_logo);
   g_logo = nullptr;
   if (g_glowTexture) SDL_DestroyTexture(g_glowTexture);
@@ -7093,6 +7393,7 @@ static void cleanupLauncher() {
   if (g_font_sm) TTF_CloseFont(g_font_sm);
   if (g_font_big) TTF_CloseFont(g_font_big);
   g_font = g_font_sm = g_font_big = nullptr;
+  g_requestedFontType = PlSharedFontType_Total;
   if (g_plReady) plExit();
   g_plReady = false;
 
@@ -7183,11 +7484,238 @@ int main(int argc, char **argv){
     g_forwarderSelfPath=argv[0];
     setLauncherPathFromArg(argv[0]);
   }
+  std::string positionalForwarderPath;
+  if(argc>=2&&argv[1]&&argv[1][0]&&argv[1][0]!='-'){
+    const std::string candidate=normalizeLocationPath(argv[1]);
+    if(candidate.find(":/")!=std::string::npos) positionalForwarderPath=candidate;
+  }
   std::string updateRecoveryError;
   const bool updateRecoveryOk=LauncherUpdate_RecoverInstallation(g_launcherNroPath,updateRecoveryError);
   if (R_FAILED(romfsInit())) return 1;
   g_romfsReady = true;
   detectSystemLanguage();
+  storeLoad(g_global,LAUNCHER_INI);
+
+  if(!positionalForwarderPath.empty()){
+    const char *directories[]={
+      "sdmc:/switch",DATA_DIR,EMU_HOST_DIR,COVERS_DIR,GAMECFG_DIR,DEF_GAMEDIR,
+      GAMEPROFILES_DIR,GRAPHICPACKS_DIR,LSFG_DIR,"sdmc:/switch/cemu/cache",
+      "sdmc:/switch/cemu/install","sdmc:/switch/cemu/mlc01"
+    };
+    for(const char *directory:directories) if(!ensureDirectory(directory)){
+      cleanupLauncher();
+      return 1;
+    }
+    cleanupLegacyEmuHosts();
+    if(!updateRecoveryOk){
+      cleanupLauncher();
+      return 1;
+    }
+
+    struct stat configStat{};
+    const bool firstRunHeadless=stat(LAUNCHER_INI,&configStat)!=0;
+    storeLoad(g_titles,TITLES_INI);
+    storeLoad(g_recent,RECENT_INI);
+    storeLoad(g_containerTitles,CONTAINER_TITLES_INI);
+    storeLoad(g_gameIdentities,GAME_IDENTITIES_INI);
+    loadLibraryOrganization();
+    { const int sort=atoi(storeGet(g_global,"Wrapper/SortMode","0")); if(sort>=0&&sort<SORT_COUNT)g_sort=sort; }
+    if(firstRunHeadless){
+      g_active=&g_global;
+      saveGameSources({DEF_GAMEDIR});
+      storeSet(g_global,"Wrapper/SteamGridDBKey","");
+      storeSet(g_global,"Wrapper/UiSounds","true");
+      storeSet(g_global,"Wrapper/Theme","homebrew");
+      storeSet(g_global,"Wrapper/Language","system");
+      storeSet(g_global,"Wrapper/Renderer","vk");
+      storeSet(g_global,"console_language","-1");
+      storeSet(g_global,"Wrapper/GridColumns","5");
+      storeSet(g_global,"Wrapper/GridRows","2");
+      storeSet(g_global,"Wrapper/ShowGameTitles","true");
+      storeSet(g_global,"Wrapper/ShowRegionFlags","true");
+      storeSet(g_global,"Wrapper/ShowCustomSettingsBadges","true");
+      storeSet(g_global,"Wrapper/UiAnimations","true");
+      storeSet(g_global,"Wrapper/CheckUpdatesAtBoot","true");
+      storeSet(g_global,"Wrapper/InstalledReleaseTag",LauncherUpdate_BuiltReleaseTag());
+      commitAll();
+      if(!storeSave(g_global,LAUNCHER_INI)){
+        cleanupLauncher();
+        return 1;
+      }
+    }
+
+    const bool directUsesUsb=isUsbStoragePath(positionalForwarderPath);
+    if(directUsesUsb&&!SwitchStorage::InitializeUsb()){
+      cleanupLauncher();
+      return 1;
+    }
+    std::vector<SwitchStorage::SmbShare> directShares=loadSmbSharesFromStore();
+    const SwitchStorage::SmbShare *directSmbShare=nullptr;
+    for(const auto &share:directShares){
+      if(pathAtOrBelow(positionalForwarderPath,SwitchStorage::SmbRootPath(share.id))){
+        directSmbShare=&share;
+        break;
+      }
+    }
+    if(directSmbShare){
+      if(R_FAILED(socketInitializeDefault())){
+        cleanupLauncher();
+        return 1;
+      }
+      g_storageSocketReady=true;
+      std::string error;
+      if(!SwitchStorage::MountSmb(*directSmbShare,&error)){
+        cleanupLauncher();
+        return 1;
+      }
+    }
+
+    std::vector<std::string> gamePathsHeadless=loadGameSources();
+    refreshConfiguredUsbSources(gamePathsHeadless);
+    gamePathsHeadless.erase(std::remove_if(gamePathsHeadless.begin(),gamePathsHeadless.end(),
+      isUnresolvedUsbSource),gamePathsHeadless.end());
+
+    auto resolveDirectGame=[&](Game &output)->bool{
+      const std::string &directPath=positionalForwarderPath;
+      struct stat info{};
+      const bool exists=SwitchStorage::GetCachedSmbStat(directPath,&info)||stat(directPath.c_str(),&info)==0;
+      if(!exists) return false;
+      const bool isDirectory=S_ISDIR(info.st_mode);
+      struct stat codeInfo{};
+      const bool isGameDirectory=isDirectory&&stat((directPath+"/code").c_str(),&codeInfo)==0;
+      const size_t slash=directPath.find_last_of("/\\");
+      const std::string file=slash==std::string::npos?directPath:directPath.substr(slash+1);
+      if(!isGameDirectory&&(isDirectory||!hasGameExt(file.c_str()))) return false;
+
+      Game game;
+      game.file=file;
+      game.path=directPath;
+      game.storageId=usbStableIdForPath(directPath);
+      game.legacyKey=makeGameKey(game.file,directPath);
+      game.key=game.legacyKey;
+      game.added=(long long)info.st_mtime;
+      game.modified=game.added;
+      game.fileSize=(long long)info.st_size;
+
+      if(!isDirectory){
+        const char *cached=storeGet(g_containerTitles,game.legacyKey.c_str(),"");
+        long long size=0,mtime=0;unsigned long long titleId=0,fingerprint=0;int consumed=0;
+        const int parsed=sscanf(cached,"%lld,%lld,%llx,%llx%n",&size,&mtime,&titleId,&fingerprint,&consumed);
+        if(parsed>=3&&cached[consumed]==0&&size==game.fileSize&&mtime==game.modified&&(titleId>>48)==0x0005){
+          game.titleId=(uint64_t)titleId;
+          if(parsed==4) game.fingerprint=(uint64_t)fingerprint;
+        }
+      }
+      const auto titleCache=cemu_loadTitleCache(std::string(DATA_DIR)+"/title_list_cache.xml");
+      if(!game.titleId) game.titleId=cemu_resolveBaseTitleId(directPath,titleCache,&game.titleIdError);
+      if(!isDirectory&&!game.fingerprint) game.fingerprint=fingerprintGameFile(directPath,info);
+      if(isDirectory&&!game.fingerprint) game.fingerprint=fingerprintGameDirectory(directPath,game.titleId);
+
+      Store refreshedIdentities=g_gameIdentities;
+      std::unordered_set<std::string> usedIdentities,reservedIds,reservedCanonicalPaths;
+      for(const KV &entry:refreshedIdentities.kv){
+        GameIdentityRecord record;
+        if(!parseIdentityRecord(entry,record)||record.retired) continue;
+        reservedIds.insert(record.key);
+        if(!record.canonicalPath.empty()&&identityPathExists(record))
+          reservedCanonicalPaths.insert(record.canonicalPath);
+      }
+      const std::string canonical=canonicalGamePath(directPath);
+      game.key=choosePersistentGameKey(refreshedIdentities,refreshedIdentities,usedIdentities,
+                                       reservedIds,reservedCanonicalPaths,game.titleId,
+                                       game.fingerprint,identityFormat(directPath,isDirectory),
+                                       canonical,directPath);
+      g_gameIdentities=std::move(refreshedIdentities);
+      if(!storeSave(g_gameIdentities,GAME_IDENTITIES_INI)) return false;
+      migrateGameIdentity(game);
+
+      const char *custom=storeGet(g_titles,game.key.c_str(),"");
+      if(!custom[0]) custom=storeGet(g_titles,game.legacyKey.c_str(),"");
+      game.title=custom[0]?custom:cleanTitle(game.file);
+      game.region=detectRegion(game.file);
+      const char *played=storeGet(g_recent,game.key.c_str(),"");
+      if(!played[0]) played=storeGet(g_recent,game.legacyKey.c_str(),"0");
+      game.played=atoll(played);
+      game.hasCfg=gameFileExists(GAMECFG_DIR,game,".ini")||
+                  regularFileExists(std::string(GAMECFG_DIR)+"/"+game.legacyKey+".ini");
+
+      if(!isDirectory&&game.titleId){
+        char cached[128];
+        snprintf(cached,sizeof(cached),"%lld,%lld,%016llx,%016llx",game.fileSize,game.modified,
+                 (unsigned long long)game.titleId,(unsigned long long)game.fingerprint);
+        storeSet(g_containerTitles,game.key.c_str(),cached);
+        storeSet(g_containerTitles,game.legacyKey.c_str(),cached);
+        if(!storeSave(g_containerTitles,CONTAINER_TITLES_INI)) return false;
+      }
+      output=std::move(game);
+      return true;
+    };
+
+    Game directGame;
+    bool directMatched=false;
+    const int attempts=directUsesUsb?100:1;
+    for(int attempt=0;attempt<attempts;attempt++){
+      if(resolveDirectGame(directGame)){directMatched=true;break;}
+      if(directUsesUsb) svcSleepThread(100000000LL);
+    }
+    if(!directMatched){
+      cleanupLauncher();
+      return 1;
+    }
+
+    recordPlayed(directGame);
+    g_active=&g_global;
+    commitAll();
+    if(!storeSave(g_global,LAUNCHER_INI)||!storeSave(g_recent,RECENT_INI)||!envHasNextLoad()){
+      cleanupLauncher();
+      return 1;
+    }
+
+    std::vector<CemuKV> effective=buildEffectiveSettings(directGame.key);
+    const char *configuredRenderer=cemuKVGet(effective,"Wrapper/Renderer","vk");
+    const std::string renderer=!strcmp(configuredRenderer,"gl")?"gl":
+                               !strcmp(configuredRenderer,"zink")?"zink":"vk";
+    const bool haveEmu=ensureEmu();
+    appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
+    std::vector<CemuGraphicPack> enabledPacks;
+    bool configOk=haveEmu&&readEnabledPacks(enabledPacks);
+    if(configOk) configOk=cemu_writeSettingsXml(SETTINGS_XML,effective,gamePathsHeadless,enabledPacks);
+    if(configOk) configOk=writeInputIni(effective);
+    if(configOk&&directGame.titleId)
+      configOk=cemu_writeGameProfile(GAMEPROFILES_DIR,directGame.titleId,
+                                     directGame.title.c_str(),effective);
+    if(configOk){
+      std::string handoff;
+      bool lsfgPrepared=renderer=="vk"&&
+        !strcmp(cemuKVGet(effective,"Wrapper/LSFGEnabled","false"),"true")&&
+        regularFileExists(LSFG_DLL_FILE);
+      configOk=appendHandoffValue(handoff,"timer_shift",cemuKVGet(effective,"TimerShiftFactor","3"))&&
+        appendHandoffValue(handoff,"triple_buffer",cemuKVGet(effective,"TripleBuffer","1"))&&
+        appendHandoffValue(handoff,"cpu_mode",cemuKVGet(effective,"cpuMode","3"))&&
+        appendHandoffValue(handoff,"renderer",renderer)&&
+        appendHandoffValue(handoff,"gamepad_layout",cemuKVGet(effective,"GamePadLayout","off"))&&
+        appendHandoffValue(handoff,"lsfg_enabled",lsfgPrepared?"true":"false")&&
+        appendHandoffValue(handoff,"lsfg_flow_scale",cemuKVGet(effective,"Wrapper/LSFGFlowScale","0.25"))&&
+        appendHandoffValue(handoff,"lsfg_performance",cemuKVGet(effective,"Wrapper/LSFGPerformance","true"))&&
+        appendHandoffValue(handoff,"usb_skylanders",cemuKVGet(effective,"UsbSkylanders","false"))&&
+        appendHandoffValue(handoff,"usb_infinity",cemuKVGet(effective,"UsbInfinity","false"))&&
+        appendHandoffValue(handoff,"usb_dimensions",cemuKVGet(effective,"UsbDimensions","false"))&&
+        appendHandoffValue(handoff,"game",directGame.path);
+      std::string usbId,physicalId,relative;
+      if(configOk&&bindMountedUsbPath(directGame.path,SwitchStorage::ListUsbLocations(),
+                                      usbId,physicalId,relative))
+        configOk=appendHandoffValue(handoff,"game_usb_id",usbId)&&
+                 appendHandoffValue(handoff,"game_usb_relative",relative);
+      if(configOk) configOk=writeAtomicText(LAUNCH_HANDOFF,handoff);
+    }
+    appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
+    if(!configOk) remove(LAUNCH_HANDOFF);
+    cleanupLauncher();
+    if(configOk) envSetNextLoad(EMU_NRO_DST,EMU_NRO_DST);
+    return configOk?0:1;
+  }
+
+  LauncherLocalization::Initialize(isAppletMode()?"system":storeGet(g_global,"Wrapper/Language","system"));
   SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"linear");
   if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)!=0) return startupFailure("SDL initialization failed.");
@@ -7213,19 +7741,7 @@ int main(int argc, char **argv){
 
   if(R_FAILED(plInitialize(PlServiceType_User))) return startupFailure("System font service initialization failed.");
   g_plReady = true;
-  PlFontData fd{};
-  if(R_FAILED(plGetSharedFontByType(&fd,PlSharedFontType_Standard)) || !fd.address || !fd.size || fd.size > INT_MAX)
-    return startupFailure("Could not load the system font.");
-  int sc = SH>=1080?1:0;
-  auto openFont = [&](int size) -> TTF_Font * {
-    SDL_RWops *rw = SDL_RWFromConstMem(fd.address,(int)fd.size);
-    return rw ? TTF_OpenFontRW(rw,1,size) : nullptr;
-  };
-  g_font_sm =openFont(sc?26:20);
-  g_font    =openFont(sc?32:26);
-  g_font_big=openFont(sc?52:40);
-  if(!g_font_sm || !g_font || !g_font_big) return startupFailure("Could not open the system font.");
-  makeGlyphs();
+  if(!loadLauncherFonts()) return startupFailure("Could not load the system font.");
   if(isAppletMode()){
     (void)ensureDirectory("sdmc:/switch");
     (void)ensureDirectory(DATA_DIR);
@@ -7250,7 +7766,6 @@ int main(int argc, char **argv){
 
   struct stat bst;
   bool firstRun = (stat(LAUNCHER_INI, &bst) != 0);
-  storeLoad(g_global, LAUNCHER_INI);
   storeLoad(g_titles, TITLES_INI);
   storeLoad(g_recent, RECENT_INI);
   storeLoad(g_containerTitles, CONTAINER_TITLES_INI);
@@ -7368,11 +7883,15 @@ int main(int argc, char **argv){
       for(const std::string &source:gamePaths)
         if(isUsbStoragePath(source)||source.rfind("cemusmb_",0)==0) mountedSources.push_back(source);
       pendingMountedSources=std::move(mountedSources);
+      if(hasUnresolvedUsbSource(gamePaths)) usbRefreshAt=SDL_GetTicks()+250;
     }
     if(hasUsbSource&&storageIntegrated){
       const Uint32 now=SDL_GetTicks();
       const uint64_t generation=SwitchStorage::UsbStatusGeneration();
-      if(generation!=usbGeneration){ usbGeneration=generation; usbRefreshAt=now+300; }
+      if(generation!=usbGeneration){
+        usbGeneration=generation;
+        usbRefreshAt=now+300;
+      }
       if(usbRefreshAt&&SDL_TICKS_PASSED(now,usbRefreshAt)){
         usbRefreshAt=0;
         const std::string selected=!g_libraryView.empty()?g_libraryView[sel]->key:std::string{};
@@ -7398,13 +7917,29 @@ int main(int argc, char **argv){
         }
         usbSnapshot=nextSnapshot;
         removeGamesFromUsbDevices(invalidated);
+        // A source that just became reachable must be scanned on the strength
+        // of that transition alone. Deriving the rescan list purely from stable
+        // device IDs dropped it whenever usbStableIdForPath() came back empty:
+        // that helper re-queries the snapshot per call, so one enumeration in
+        // progress left the library permanently empty with no retry pending.
+        const std::vector<std::string> previousSources=gamePaths;
         refreshConfiguredUsbSources(gamePaths);
         std::vector<std::string> changedUsbSources;
+        std::unordered_set<std::string> queuedSources;
         for(const std::string &source:gamePaths){
+          if(isUnresolvedUsbSource(source)) continue;
+          const std::string identity=pathIdentity(source);
+          const bool appeared=std::none_of(previousSources.begin(),previousSources.end(),
+            [&](const std::string &previous){ return pathIdentity(previous)==identity; });
           const std::string id=usbStableIdForPath(source);
-          if(!id.empty()&&needsScan.count(id)) changedUsbSources.push_back(source);
+          if(!appeared&&(id.empty()||!needsScan.count(id))) continue;
+          if(queuedSources.insert(identity).second) changedUsbSources.push_back(source);
         }
         if(!changedUsbSources.empty()) pendingMountedSources=std::move(changedUsbSources);
+        // Keep polling for as long as a configured drive is still missing. The
+        // old six second budget gave up for good when a disk enumerated late or
+        // its folder was not readable yet, and nothing rearmed the timer after.
+        if(hasUnresolvedUsbSource(gamePaths)) usbRefreshAt=now+500;
         sel=0;
         if(!selected.empty()) for(size_t index=0;index<g_libraryView.size();index++) if(g_libraryView[index]->key==selected){ sel=(int)index; break; }
         top=0;
@@ -7515,6 +8050,7 @@ int main(int argc, char **argv){
             usbGeneration=usbSnapshot.generation;
             usbRefreshAt=0;
             refreshConfiguredUsbSources(gamePaths);
+            if(hasUnresolvedUsbSource(gamePaths)) usbRefreshAt=SDL_GetTicks()+250;
             startGameScan(gamePaths,true);
             sel=0;
             top=0;
@@ -7572,7 +8108,10 @@ int main(int argc, char **argv){
 
     std::vector<CemuGraphicPack> enabledPacks;
     bool configOk = haveEmu && readEnabledPacks(enabledPacks);
-    if (configOk) configOk = cemu_writeSettingsXml(SETTINGS_XML, eff, gamePaths, enabledPacks);
+    std::vector<std::string> mountedGamePaths;
+    for(const std::string &path:gamePaths)
+      if(!isUnresolvedUsbSource(path)) mountedGamePaths.push_back(path);
+    if (configOk) configOk = cemu_writeSettingsXml(SETTINGS_XML, eff, mountedGamePaths, enabledPacks);
     if (configOk) configOk = writeInputIni(eff);
     if(configOk && launchTitleId){
       const char *gname = "";
@@ -7608,6 +8147,12 @@ int main(int argc, char **argv){
         snprintf(gameId, sizeof(gameId), "id:%016llx", (unsigned long long)launchTitleId);
         configOk = appendHandoffValue(handoff, "game", gameId);
       }
+      std::string usbId,physicalId,relative;
+      if(configOk&&!launchPath.empty()&&
+         bindMountedUsbPath(launchPath,SwitchStorage::ListUsbLocations(),
+                            usbId,physicalId,relative))
+        configOk=appendHandoffValue(handoff,"game_usb_id",usbId)&&
+                 appendHandoffValue(handoff,"game_usb_relative",relative);
       if (configOk) configOk = writeAtomicText(LAUNCH_HANDOFF, handoff);
     }
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);

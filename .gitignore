@@ -24,7 +24,7 @@ bin/Cemu_*
 bin/Cemu_*.exe
 
 # Nintendo Switch build outputs
-/build_switch/
+/build_switch*/
 /build-switch*/
 /work/
 /bin/Cemu.nro

@@ -27,6 +27,7 @@
 #include "platform/switch/SwitchOverlay.h"
 #include "platform/switch/SwitchPlatform.h"
 #include "platform/switch/SwitchToys.h"
+#include "platform/switch/common/SwitchStorage.h"
 #include "util/MemMapper/MemMapper.h"
 #include "Cemu/FileCache/FileCache.h"
 #include "Cemu/ncrypto/ncrypto.h"
@@ -624,7 +625,22 @@ namespace WindowSystem
 			return false;
 		}
 
-		if (std::string line = Handoff("game"); !line.empty())
+		std::string line = Handoff("game");
+		const std::string usbId = Handoff("game_usb_id");
+		if (!usbId.empty())
+		{
+			std::string root = SwitchStorage::ResolveUsbPath(usbId);
+			std::string relative = Handoff("game_usb_relative");
+			while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\'))
+				relative.erase(relative.begin());
+			if (!root.empty())
+			{
+				if (root.back() != '/')
+					root += '/';
+				line = root + relative;
+			}
+		}
+		if (!line.empty())
 		{
 			TitleId baseTitleId = 0;
 			bool resolved = false;

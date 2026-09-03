@@ -78,6 +78,7 @@ std::string SmbBrowsePath(const SmbShare& share);
 std::vector<Location> ListUsbLocations();
 std::vector<SmbShare> LoadSmbShares(const std::string& iniPath);
 void InitializeFromConfig(const std::string& iniPath, bool initializeUsb = true,
-                          std::vector<std::string>* errors = nullptr);
+                          std::vector<std::string>* errors = nullptr,
+                          const std::string& requiredPath = {});
 void Shutdown();
 } // namespace SwitchStorage

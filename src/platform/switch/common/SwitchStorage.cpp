@@ -147,7 +147,8 @@ int SynchronizeFilePosition(SmbFile* file)
 std::mutex s_mountMutex;
 std::vector<std::shared_ptr<SmbMount>> s_smbMounts;
 std::vector<std::unique_ptr<SmbDevice>> s_smbDevices;
-bool s_usbInitialized = false;
+std::atomic_bool s_usbInitialized{false};
+std::mutex s_usbInitMutex;
 std::atomic<uint64_t> s_usbGeneration{0};
 std::mutex s_usbMutex;
 std::vector<UsbHsFsDevice> s_usbDevices;
@@ -931,19 +932,25 @@ std::string SmbBrowsePath(const SmbShare& share)
 
 bool InitializeUsb(std::string* error)
 {
+	std::lock_guard<std::mutex> initLock(s_usbInitMutex);
+	if (s_usbInitialized.load(std::memory_order_acquire)) return true;
+
+	// Register before starting the libusbhsfs manager. Registering afterwards
+	// misses the first populate event, so a drive already attached at boot is
+	// never published until it is unplugged and reconnected.
+	usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_None);
+	usbHsFsSetPopulateCallback(usbStatusChanged,nullptr);
+	const Result result=usbHsFsInitialize(0);
+	if (R_FAILED(result))
 	{
-		std::lock_guard<std::mutex> lock(s_mountMutex);
-		if (s_usbInitialized) return true;
-		usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_None);
-		const Result result=usbHsFsInitialize(0);
-		if (R_FAILED(result))
-		{
-			if (error) { char message[64]; std::snprintf(message,sizeof(message),"USB initialization failed (0x%08x)",result); *error=message; }
-			return false;
-		}
-		s_usbInitialized=true; usbHsFsSetPopulateCallback(usbStatusChanged,nullptr);
+		usbHsFsSetPopulateCallback(nullptr,nullptr);
+		if (error) { char message[64]; std::snprintf(message,sizeof(message),"USB initialization failed (0x%08x)",result); *error=message; }
+		return false;
 	}
-	std::array<UsbHsFsDevice,32> devices{}; const u32 count=usbHsFsListMountedDevices(devices.data(),devices.size()); usbStatusChanged(devices.data(),count,nullptr);
+
+	// Device discovery continues on libusbhsfs' manager thread. The callback
+	// publishes the first and all subsequent snapshots without blocking the UI.
+	s_usbInitialized.store(true,std::memory_order_release);
 	return true;
 }
 
@@ -1147,14 +1154,18 @@ std::vector<SmbShare> LoadSmbShares(const std::string& iniPath)
 }
 
 void InitializeFromConfig(const std::string& iniPath, bool initializeUsb,
-                          std::vector<std::string>* errors)
+                           std::vector<std::string>* errors,
+                           const std::string& requiredPath)
 {
 	std::string error;
 	if (initializeUsb && !InitializeUsb(&error) && errors)
 		errors->emplace_back(std::move(error));
 	for (const auto& share : LoadSmbShares(iniPath))
 	{
-		if (!share.autoMount)
+		const std::string root = SmbRootPath(share.id);
+		const bool required = !requiredPath.empty() && !root.empty() &&
+			requiredPath.compare(0, root.size(), root) == 0;
+		if (!share.autoMount && !required)
 			continue;
 		error.clear();
 		if (!MountSmb(share, &error) && errors)

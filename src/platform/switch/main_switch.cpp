@@ -2,7 +2,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
+#include <string>
 
 #include "WindowSystem.h"
 #include "Common/ExceptionHandler/ExceptionHandler.h"
@@ -175,6 +177,28 @@ static bool s_hidInitialized = false;
 static bool s_socketInitialized = false;
 static bool s_storageInitialized = false;
 
+static std::string ReadLaunchGamePath()
+{
+	FILE* file = std::fopen("sdmc:/switch/cemu/switch.ini", "r");
+	if (!file)
+		return {};
+	char line[2048]{};
+	std::string result;
+	while (std::fgets(line, sizeof(line), file))
+	{
+		size_t length = std::strlen(line);
+		while (length && (line[length - 1] == '\r' || line[length - 1] == '\n'))
+			line[--length] = '\0';
+		if (std::strncmp(line, "game=", 5) == 0)
+		{
+			result.assign(line + 5);
+			break;
+		}
+	}
+	std::fclose(file);
+	return result;
+}
+
 static bool SwitchPlatformInit()
 {
 	s_romfsMounted = R_SUCCEEDED(romfsInit());
@@ -182,7 +206,8 @@ static bool SwitchPlatformInit()
 	if (s_hidInitialized)
 		padConfigureInput(8, HidNpadStyleSet_NpadStandard);
 	s_socketInitialized = R_SUCCEEDED(socketInitializeDefault());
-	SwitchStorage::InitializeFromConfig("sdmc:/switch/cemu/launcher.ini");
+	SwitchStorage::InitializeFromConfig("sdmc:/switch/cemu/launcher.ini", true, nullptr,
+	                                    ReadLaunchGamePath());
 	s_storageInitialized = true;
 	return s_romfsMounted && s_hidInitialized;
 }
