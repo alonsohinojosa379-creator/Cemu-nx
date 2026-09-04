@@ -573,6 +573,46 @@ namespace WindowSystem
 		}
 	}
 
+	// ums0:, ums1: ... - the mount aliases libusbhsfs hands out.
+	static bool IsUsbStoragePath(const std::string& path)
+	{
+		const size_t colon = path.find(':');
+		if (colon < 4 || colon == std::string::npos)
+			return false;
+		if (std::tolower((unsigned char)path[0]) != 'u' ||
+			std::tolower((unsigned char)path[1]) != 'm' ||
+			std::tolower((unsigned char)path[2]) != 's')
+			return false;
+		for (size_t i = 3; i < colon; i++)
+			if (!std::isdigit((unsigned char)path[i]))
+				return false;
+		return true;
+	}
+
+	static void WaitForUsbStorage(const std::string& usbId, const std::string& path)
+	{
+		constexpr int kMaxAttempts = 100;   // 100 x 100ms = 10 seconds
+		constexpr uint64_t kPollNs = 100'000'000ULL;
+		for (int attempt = 0; attempt < kMaxAttempts; attempt++)
+		{
+			if (!usbId.empty())
+			{
+				if (!SwitchStorage::ResolveUsbPath(usbId).empty())
+				{
+					cemuLog_log(LogType::Force, "USB storage ready after {}ms", attempt * 100);
+					return;
+				}
+			}
+			else if (!SwitchStorage::GetUsbSnapshot().locations.empty())
+			{
+				cemuLog_log(LogType::Force, "USB storage ready after {}ms", attempt * 100);
+				return;
+			}
+			svcSleepThread(kPollNs);
+		}
+		cemuLog_log(LogType::Force, "USB storage did not appear within 10s (id '{}', path '{}'), the game will probably not be found", usbId, path);
+	}
+
 	static bool ResolveTitleId(TitleId titleId, TitleId& baseTitleId)
 	{
 		AddInstalledTitleComponents(titleId);
@@ -636,6 +676,11 @@ namespace WindowSystem
 
 		std::string line = Handoff("game");
 		const std::string usbId = Handoff("game_usb_id");
+		const bool gameIsOnUsb = !usbId.empty() || IsUsbStoragePath(line);
+		if (gameIsOnUsb)
+		{
+			WaitForUsbStorage(usbId, line);
+		}
 		if (!usbId.empty())
 		{
 			std::string root = SwitchStorage::ResolveUsbPath(usbId);
