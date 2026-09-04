@@ -36,6 +36,7 @@ namespace
 
 extern "C"
 {
+	void _start() __attribute__((visibility("hidden")));
 	alignas(16) u8 __nx_exception_stack[0x10000];
 	u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
 
@@ -65,6 +66,7 @@ extern "C"
 #if defined(EMULATOR_HASH)
 		append("build: %s\n", CEMU_STRINGIZE(EMULATOR_HASH));
 #endif
+		append("module_base: 0x%016llx\n", reinterpret_cast<unsigned long long>(&_start));
 		append("error_desc: 0x%08x\n", context->error_desc);
 		for (int index = 0; index < 29; ++index)
 			append("x%-2d: 0x%016llx\n", index,
@@ -78,6 +80,15 @@ extern "C"
 		append("afsr1: 0x%08x\n", context->afsr1);
 		append("esr: 0x%08x\n", context->esr);
 		append("far: 0x%016llx\n", static_cast<unsigned long long>(context->far.x));
+		MemoryInfo mapping{};
+		u32 pageInfo = 0;
+		const Result query = svcQueryMemory(&mapping, &pageInfo, context->far.x);
+		if (R_SUCCEEDED(query))
+			append("far_mapping: 0x%llx+0x%llx type=0x%x perm=0x%x attr=0x%x device_refs=%u ipc_refs=%u\n",
+				static_cast<unsigned long long>(mapping.addr), static_cast<unsigned long long>(mapping.size),
+				mapping.type, mapping.perm, mapping.attr, mapping.device_refcount, mapping.ipc_refcount);
+		else
+			append("far_mapping_query: 0x%08x\n", query);
 		WriteAll(fd, report, used);
 		::close(fd);
 	}

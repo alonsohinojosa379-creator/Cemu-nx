@@ -10,6 +10,8 @@ void LatteBufferCache_invalidate(MPTR physAddress, uint32 size);
 void LatteBufferCache_notifyDCFlush(MPTR address, uint32 size);
 void LatteBufferCache_processDCFlushQueue();
 
+void LatteBufferCache_setHostMemorySync(MPTR base, uint32 size);
+
 void LatteBufferCache_processDeallocations();
 void LatteBufferCache_incrementalCleanup();
 

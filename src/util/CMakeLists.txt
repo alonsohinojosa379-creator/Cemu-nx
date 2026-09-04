@@ -72,7 +72,12 @@ add_library(CemuUtil
 if(PLATFORM_SWITCH)
 	enable_language(ASM)
 	target_sources(CemuUtil PRIVATE Fiber/FiberSwitch.cpp Fiber/FiberSwitchAsm.S)
-	target_sources(CemuUtil PRIVATE MemMapper/MemMapperSwitch.cpp)
+	target_sources(CemuUtil PRIVATE
+		MemMapper/MemMapperSwitch.cpp
+		MemMapper/SwitchGuestMemory.cpp
+		MemMapper/SwitchGuestMemory.h
+		MemMapper/SwitchGuestMemoryLayout.h
+	)
 	target_sources(CemuUtil PRIVATE SystemInfo/SystemInfoStub.cpp)
 elseif(WIN32)
 	target_sources(CemuUtil PRIVATE Fiber/FiberWin.cpp)

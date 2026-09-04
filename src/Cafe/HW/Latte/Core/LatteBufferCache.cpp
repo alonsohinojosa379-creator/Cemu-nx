@@ -2,6 +2,10 @@
 #include "util/ChunkedHeap/ChunkedHeap.h"
 #include "util/helpers/fspinlock.h"
 #include "config/ActiveSettings.h"
+#if defined(__SWITCH__)
+#include "Cafe/HW/MMU/MMU.h"
+#include "platform/switch/SwitchMemory.h"
+#endif
 
 #define CACHE_PAGE_SIZE		0x400
 #define CACHE_PAGE_SIZE_M1	(CACHE_PAGE_SIZE-1)
@@ -1696,13 +1700,22 @@ FSpinlock g_spinlockDCFlushQueue;
 SparseBitset* s_DCFlushQueue = new SparseBitset();
 SparseBitset* s_DCFlushQueueAlternate = new SparseBitset();
 
+static MPTR s_hostSyncBase = 0;
+static uint32 s_hostSyncSize = 0;
+
+void LatteBufferCache_setHostMemorySync(MPTR base, uint32 size)
+{
+	s_hostSyncBase = base;
+	s_hostSyncSize = size;
+}
+
 void LatteBufferCache_notifyDCFlush(MPTR address, uint32 size)
 {
-	if (address == 0 || size == 0xFFFFFFFF)
+	if (size == 0 || address == 0 || size == 0xFFFFFFFF)
 		return; // global flushes are ignored for now
 
 	uint32 firstPage = address / CACHE_PAGE_SIZE;
-	uint32 lastPage = (address + size - 1) / CACHE_PAGE_SIZE;
+	uint32 lastPage = (uint32)(std::min<uint64>((uint64)address + size - 1, UINT32_MAX) / CACHE_PAGE_SIZE);
 	g_spinlockDCFlushQueue.lock();
 	for (uint32 i = firstPage; i <= lastPage; i++)
 		s_DCFlushQueue->Set(i);
@@ -1711,12 +1724,26 @@ void LatteBufferCache_notifyDCFlush(MPTR address, uint32 size)
 
 void LatteBufferCache_processDCFlushQueue()
 {
-	if (s_DCFlushQueue->Empty()) // quick check to avoid locking if there is no work to do
-		return;
 	g_spinlockDCFlushQueue.lock();
+	if (s_DCFlushQueue->Empty())
+	{
+		g_spinlockDCFlushQueue.unlock();
+		return;
+	}
 	std::swap(s_DCFlushQueue, s_DCFlushQueueAlternate);
 	g_spinlockDCFlushQueue.unlock();
-	s_DCFlushQueueAlternate->ForAllAndClear([](uint32 index) {LatteBufferCache_invalidatePage(index * CACHE_PAGE_SIZE); });
+	s_DCFlushQueueAlternate->ForAllAndClear([](uint32 index) {
+		const MPTR pageAddress = index * CACHE_PAGE_SIZE;
+		if (s_hostSyncSize == 0)
+		{
+			LatteBufferCache_invalidatePage(pageAddress);
+			return;
+		}
+#if defined(__SWITCH__)
+		if (pageAddress - s_hostSyncBase < s_hostSyncSize)
+			SwitchMemory_CleanForGpu(memory_getPointerFromVirtualOffset(pageAddress), CACHE_PAGE_SIZE);
+#endif
+	});
 }
 
 void LatteBufferCache_notifyDrawDone()

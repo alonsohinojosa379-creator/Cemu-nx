@@ -24,11 +24,14 @@
 #include "platform/switch/SwitchInput.h"
 #include "platform/switch/SwitchJit.h"
 #include "platform/switch/SwitchLSFG.h"
+#include "platform/switch/SwitchMemory.h"
 #include "platform/switch/SwitchOverlay.h"
 #include "platform/switch/SwitchPlatform.h"
 #include "platform/switch/SwitchToys.h"
+
 #include "platform/switch/common/SwitchStorage.h"
 #include "util/MemMapper/MemMapper.h"
+#include "util/MemMapper/SwitchGuestMemory.h"
 #include "Cemu/FileCache/FileCache.h"
 #include "Cemu/ncrypto/ncrypto.h"
 
@@ -433,6 +436,8 @@ namespace WindowSystem
 
 		SetupPaths();
 		ActiveSettings::Init();
+		cemuLog_log(LogType::Force, "Switch: stack region {}", SwitchMemory_DescribeStackRegion());
+		cemuLog_log(LogType::Force, "Switch: MEM2 backed by {}", MemMapper::DescribeGuestBacking());
 
 		GetConfigHandle().SetFilename(ActiveSettings::GetConfigPath("settings.xml").generic_wstring());
 		GetConfigHandle().Load();
@@ -445,6 +450,10 @@ namespace WindowSystem
 		s_rendererBackend = requestedRenderer == "gl" || requestedRenderer == "zink" ?
 			requestedRenderer : "vk";
 		GetConfig().graphic_api = s_rendererBackend == "vk" ? kVulkan : kOpenGL;
+		const bool importGuestMemory = s_rendererBackend == "vk";
+		MemMapper::SetGuestMemoryImportRequired(importGuestMemory);
+		// Older global/per-game settings must not disable the mandatory path.
+		GetConfig().vk_host_memory_import = importGuestMemory;
 		const std::string lsfgEnabled = Handoff("lsfg_enabled", "false");
 		const std::string lsfgPerformance = Handoff("lsfg_performance", "true");
 		SwitchLSFG_Configure(

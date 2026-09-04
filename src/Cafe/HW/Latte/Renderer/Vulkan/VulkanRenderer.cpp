@@ -1,6 +1,9 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
 #if defined(__SWITCH__)
 #include "platform/switch/SwitchThread.h"
+#include "platform/switch/SwitchMemory.h"
+#include "platform/switch/common/SwitchLaunchPolicy.h"
+#include "util/MemMapper/MemMapper.h"
 #endif
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/LatteTextureVk.h"
@@ -922,6 +925,12 @@ VulkanRenderer::~VulkanRenderer()
 	memoryManager->DeleteBuffer(m_xfbRingBuffer, m_xfbRingBufferMemory);
 	memoryManager->DeleteBuffer(m_occlusionQueries.bufferQueryResults, m_occlusionQueries.memoryQueryResults);
 	memoryManager->DeleteBuffer(m_bufferCache, m_bufferCacheMemory);
+#if defined(__SWITCH__)
+	if (m_useHostMemoryForCache)
+		vkUnmapMemory(m_logicalDevice, m_importedMemMemory);
+#endif
+	memoryManager->DeleteBuffer(m_importedMem, m_importedMemMemory);
+	LatteBufferCache_setHostMemorySync(0, 0);
 
 	m_padSwapchainInfo = nullptr;
 	m_mainSwapchainInfo = nullptr;
@@ -2223,6 +2232,16 @@ void VulkanRenderer::ProcessFinishedCommandBuffers()
 	}
 	if (finishedCmdBuffers)
 	{
+#if defined(__SWITCH__)
+		for (auto it = m_hostMemoryWrites.begin(); it != m_hostMemoryWrites.end();)
+		{
+			if (!HasCommandBufferFinished(it->commandBufferId))
+				break;
+			SwitchMemory_InvalidateFromGpu(memory_getPointerFromVirtualOffset(
+				m_importedMemBaseAddress + static_cast<MPTR>(it->offset)), it->size);
+			it = m_hostMemoryWrites.erase(it);
+		}
+#endif
 		LatteTextureReadback_UpdateFinishedTransfers(false);
 	}
 }
@@ -3987,25 +4006,105 @@ void VulkanRenderer::buffer_bindUniformBuffer(LatteConst::ShaderType shaderType,
 
 void VulkanRenderer::bufferCache_init(const sint32 bufferSize)
 {
-	m_importedMemBaseAddress = 0x10000000;
-	size_t hostAllocationSize = 0x40000000ull;
-	// todo - get size of allocation
-	/*
-	bool configUseHostMemory = false; // todo - replace this with a config option
+	m_importedMemBaseAddress = mmuRange_MEM2.getBase();
+	const size_t hostAllocationSize = mmuRange_MEM2.getSize();
 	m_useHostMemoryForCache = false;
-	if (m_featureControl.deviceExtensions.external_memory_host && configUseHostMemory)
+	LatteBufferCache_setHostMemorySync(0, 0);
+#if defined(__SWITCH__)
+	cemuLog_log(LogType::Force, "Switch: MEM2 backed by {}", MemMapper::DescribeGuestBacking());
+#endif
+	
+#if defined(__SWITCH__)
+	constexpr bool configUseHostMemory = true;
+#else
+	const bool configUseHostMemory = GetConfig().vk_host_memory_import;
+#endif
+	if (configUseHostMemory && !m_featureControl.deviceExtensions.external_memory_host)
 	{
-		m_useHostMemoryForCache = memoryManager->CreateBufferFromHostMemory(memory_getPointerFromVirtualOffset(m_importedMemBaseAddress), hostAllocationSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, m_importedMem, m_importedMemMemory);
-		if (!m_useHostMemoryForCache)
+#if defined(__SWITCH__)
+		throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, "VK_EXT_external_memory_host is unavailable");
+#else
+		cemuLog_log(LogType::Force, "Host memory import requested but VK_EXT_external_memory_host is not available, using the buffer cache");
+#endif
+	}
+#if defined(__SWITCH__)
+	else if (configUseHostMemory && !SwitchMemory_CanSynchronizeForGpu())
+	{
+		throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, "Kernel cache synchronization unavailable");
+	}
+#endif
+	else if (configUseHostMemory)
+	{
+		uint8* hostPointer = memory_getPointerFromVirtualOffset(m_importedMemBaseAddress);
+		VkPhysicalDeviceExternalMemoryHostPropertiesEXT hostMemProps{};
+		hostMemProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
+		VkPhysicalDeviceProperties2 props2{};
+		props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+		props2.pNext = &hostMemProps;
+		vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
+		const VkDeviceSize alignment = hostMemProps.minImportedHostPointerAlignment;
+		const bool aligned = alignment != 0 &&
+			((uintptr_t)hostPointer % alignment) == 0 && (hostAllocationSize % alignment) == 0;
+		cemuLog_log(LogType::Force, "Host memory import: base 0x{:08x} ptr 0x{:016x} size {}MB, required alignment {}",
+					m_importedMemBaseAddress, (uintptr_t)hostPointer, hostAllocationSize / (1024 * 1024), alignment);
+#if defined(__SWITCH__)
+		cemuLog_log(LogType::Force, "Host memory import: mapping {}", SwitchMemory_DescribeMapping(hostPointer));
+#endif
+		if (!aligned)
 		{
-			cemuLog_log(LogType::Force, "Unable to import host memory to Vulkan buffer. Use default cache system instead");
+#if defined(__SWITCH__)
+			throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, "MEM2 does not satisfy the host import alignment");
+#else
+			cemuLog_log(LogType::Force, "Host memory import: pointer or size is not a multiple of {}, using the buffer cache", alignment);
+#endif
+		}
+		else
+		{
+#if defined(__SWITCH__)
+			constexpr VkMemoryPropertyFlags hostProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+#else
+			constexpr VkMemoryPropertyFlags hostProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+#endif
+			m_useHostMemoryForCache = memoryManager->CreateBufferFromHostMemory(hostPointer, hostAllocationSize,
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+				hostProperties, m_importedMem, m_importedMemMemory);
+#if defined(__SWITCH__)
+			if (m_useHostMemoryForCache)
+			{
+				void* mapped = nullptr;
+				const VkResult result = vkMapMemory(m_logicalDevice, m_importedMemMemory, 0, VK_WHOLE_SIZE, 0, &mapped);
+				if (result != VK_SUCCESS)
+				{
+					cemuLog_log(LogType::Force, "Host memory import: cache-maintenance mapping failed ({})", (sint32)result);
+					memoryManager->DeleteBuffer(m_importedMem, m_importedMemMemory);
+					m_useHostMemoryForCache = false;
+				}
+			}
+#endif
+			if (m_useHostMemoryForCache)
+			{
+#if defined(__SWITCH__)
+				SwitchMemory_CleanForGpu(hostPointer, hostAllocationSize);
+#endif
+				LatteBufferCache_setHostMemorySync(m_importedMemBaseAddress, (uint32)hostAllocationSize);
+				cemuLog_log(LogType::Force, "Host memory import: active, MEM2 imported directly; skipped {}MB vertex/uniform buffer cache", bufferSize / (1024 * 1024));
+			}
+#if !defined(__SWITCH__)
+			else
+				cemuLog_log(LogType::Force, "Host memory import: failed, using the buffer cache instead");
+#endif
 		}
 	}
-	*/
+	
 	if(!m_useHostMemoryForCache)
 	{
+#if defined(__SWITCH__)
+		throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, "MEM2 host import failed; the buffer cache is disabled on Cemu NX");
+#else
 		if (!memoryManager->CreateBuffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, m_bufferCache, m_bufferCacheMemory))
 			UnrecoverableError("Failed to allocate the Vulkan buffer cache");
+#endif
 	}
 }
 
@@ -4068,8 +4167,17 @@ void VulkanRenderer::bufferCache_copyStreamoutToMainBuffer(uint32 srcOffset, uin
 	if (m_useHostMemoryForCache)
 	{
 		// in host memory mode, dstOffset is physical address instead of cache address
+#if defined(__SWITCH__)
+		SwitchMemory_FlushForGpuWrite(memory_getPointerFromVirtualOffset(dstOffset), size);
+#endif
 		dstBuffer = m_importedMem;
 		dstOffset -= m_importedMemBaseAddress;
+#if defined(__SWITCH__)
+		const VkDeviceSize atom = GetNonCoherentAtomSize();
+		const VkDeviceSize start = dstOffset / atom * atom;
+		const VkDeviceSize end = ((VkDeviceSize)dstOffset + size + atom - 1) / atom * atom;
+		m_hostMemoryWrites.push_back({GetCurrentCommandBufferId(), start, end - start});
+#endif
 	}
 	else
 		dstBuffer = m_bufferCache;

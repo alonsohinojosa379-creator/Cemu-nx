@@ -13,7 +13,10 @@
 #include "SwitchPlatform.h"
 #include "SwitchMemoryBudget.h"
 #include "common/SwitchStorage.h"
+#include "common/SwitchLaunchPolicy.h"
 #include "platform/switch/SwitchThread.h"
+#include "util/MemMapper/MemMapper.h"
+#include "util/MemMapper/SwitchGuestMemory.h"
 
 std::atomic_bool g_isGPUInitFinished = false;
 
@@ -27,6 +30,7 @@ u64 g_switchProcessMemoryTotal = 0;
 u64 g_switchProcessMemoryUsed = 0;
 Result g_switchHeapExpansionResult = 0;
 bool g_switchHeapExpansionAttempted = false;
+
 
 namespace
 {
@@ -45,8 +49,12 @@ namespace
 		std::fprintf(file, "total_heap=%zu\n", g_switchHeapTotalSize);
 		std::fprintf(file, "newlib_heap=%zu\n", g_switchNewlibHeapSize);
 		std::fprintf(file, "guest_pool=%zu\n", g_switchGuestPoolSize);
+		std::fprintf(file, "guest_backing=%s\n", MemMapper::DescribeGuestBacking());
 		std::fprintf(file, "heap_expansion_attempted=%d\n", g_switchHeapExpansionAttempted ? 1 : 0);
 		std::fprintf(file, "heap_expansion_result=0x%08x\n", static_cast<unsigned>(g_switchHeapExpansionResult));
+		MemMapper::SwitchGuestMemory::PrintDiagnostics([](void* context, const char* line) {
+			std::fprintf(static_cast<FILE*>(context), "%s\n", line);
+		}, file);
 		std::fclose(file);
 	}
 
@@ -150,9 +158,9 @@ extern "C"
 		if (heapBase && targetGuestPool != 0 && targetGuestPool < heapTotal)
 		{
 			const size_t heapSize = (heapTotal - targetGuestPool) & ~0x1FFFFFull;
+			g_switchGuestPoolBase = heapBase + heapSize;
 			fake_heap_start = heapBase;
 			fake_heap_end = heapBase + heapSize;
-			g_switchGuestPoolBase = heapBase + heapSize;
 			g_switchGuestPoolSize = heapTotal - heapSize;
 			g_switchNewlibHeapSize = heapSize;
 		}
@@ -217,6 +225,7 @@ static bool SwitchPlatformInit()
 
 static void SwitchPlatformExit()
 {
+	MemMapper::SwitchGuestMemory::DiscardEarly("core exited before adoption");
 	SwitchAudioAPI::Destroy();
 	if (s_storageInitialized)
 	{
@@ -256,20 +265,29 @@ int main(int argc, char* argv[])
 	}
 	std::remove(kLastCoreErrorPath);
 
+	std::remove(SwitchLaunch::ErrorPath);
 	int status = EXIT_SUCCESS;
 	try
 	{
 		ExceptionHandler_Init();
 		WindowSystem::Create();
 	}
+	catch (const SwitchLaunch::Failure& exception)
+	{
+		WriteLastCoreError("host-memory", exception.what());
+		SwitchLaunch::WriteError(exception.error);
+		status = EXIT_FAILURE;
+	}
 	catch (const std::exception& exception)
 	{
 		WriteLastCoreError("window", exception.what());
+		SwitchLaunch::WriteError(SwitchLaunch::Error::LaunchFailed);
 		status = EXIT_FAILURE;
 	}
 	catch (...)
 	{
 		WriteLastCoreError("window", "unknown exception");
+		SwitchLaunch::WriteError(SwitchLaunch::Error::LaunchFailed);
 		status = EXIT_FAILURE;
 	}
 

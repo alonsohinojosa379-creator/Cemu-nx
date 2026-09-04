@@ -8,6 +8,7 @@
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteIndices.h"
+#include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 #include "Cafe/OS/libs/gx2/GX2.h"
 #include "imgui/imgui_impl_vulkan.h"
 #include "Cafe/GameProfile/GameProfile.h"
@@ -1418,6 +1419,7 @@ void VulkanRenderer::draw_execute_first(uint32 baseVertex, uint32 baseInstance, 
 	if (m_useHostMemoryForCache)
 	{
 		// direct memory access (Wii U memory space imported as a Vulkan buffer), update buffer bindings
+		LatteBufferCache_processDCFlushQueue();
 		draw_updateVertexBuffersDirectAccess();
 		LatteDecompilerShader* vertexShader = LatteSHRC_GetActiveVertexShader();
 		if (vertexShader)
@@ -1586,16 +1588,17 @@ void VulkanRenderer::draw_execute_continued(uint32 baseVertex, uint32 baseInstan
 	if (m_useHostMemoryForCache)
 	{
 		// direct memory access (Wii U memory space imported as a Vulkan buffer), update buffer bindings
+		LatteBufferCache_processDCFlushQueue();
 		draw_updateVertexBuffersDirectAccess();
 		LatteDecompilerShader* vertexShader = LatteSHRC_GetActiveVertexShader();
-		if (vertexShader)
-			draw_updateUniformBuffersDirectAccess(vertexShader, mmSQ_VTX_UNIFORM_BLOCK_START, LatteConst::ShaderType::Vertex);
+		if (vertexShader && draw_updateUniformBuffersDirectAccess(vertexShader, mmSQ_VTX_UNIFORM_BLOCK_START, LatteConst::ShaderType::Vertex))
+			stageUniformModifiedMask |= 1 << VulkanRendererConst::SHADER_STAGE_INDEX_VERTEX;
 		LatteDecompilerShader* geometryShader = LatteSHRC_GetActiveGeometryShader();
-		if (geometryShader)
-			draw_updateUniformBuffersDirectAccess(geometryShader, mmSQ_GS_UNIFORM_BLOCK_START, LatteConst::ShaderType::Geometry);
+		if (geometryShader && draw_updateUniformBuffersDirectAccess(geometryShader, mmSQ_GS_UNIFORM_BLOCK_START, LatteConst::ShaderType::Geometry))
+			stageUniformModifiedMask |= 1 << VulkanRendererConst::SHADER_STAGE_INDEX_GEOMETRY;
 		LatteDecompilerShader* pixelShader = LatteSHRC_GetActivePixelShader();
-		if (pixelShader)
-			draw_updateUniformBuffersDirectAccess(pixelShader, mmSQ_PS_UNIFORM_BLOCK_START, LatteConst::ShaderType::Pixel);
+		if (pixelShader && draw_updateUniformBuffersDirectAccess(pixelShader, mmSQ_PS_UNIFORM_BLOCK_START, LatteConst::ShaderType::Pixel))
+			stageUniformModifiedMask |= 1 << VulkanRendererConst::SHADER_STAGE_INDEX_FRAGMENT;
 	}
 	else
 	{
@@ -1768,15 +1771,17 @@ void VulkanRenderer::draw_updateVertexBuffersDirectAccess()
 		}
 		if (m_state.currentVertexBinding[bufferIndex].offset == bufferAddress)
 			continue;
-		cemu_assert_debug(bufferAddress < 0x50000000);
+		cemu_assert_debug(bufferAddress >= m_importedMemBaseAddress && bufferAddress - m_importedMemBaseAddress < mmuRange_MEM2.getSize());
+		m_state.currentVertexBinding[bufferIndex].offset = bufferAddress;
 		VkBuffer attrBuffer = m_importedMem;
 		VkDeviceSize attrOffset = bufferAddress - m_importedMemBaseAddress;
 		vkCmdBindVertexBuffers(m_state.currentCommandBuffer, bufferIndex, 1, &attrBuffer, &attrOffset);
 	}
 }
 
-void VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader* shader, const uint32 uniformBufferRegOffset, LatteConst::ShaderType shaderType)
+bool VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader* shader, const uint32 uniformBufferRegOffset, LatteConst::ShaderType shaderType)
 {
+	bool changed = false;
 	if (shader->uniformMode == LATTE_DECOMPILER_UNIFORM_MODE_FULL_CBANK)
 	{
 		for(const auto& buf : shader->list_quickBufferList)
@@ -1792,7 +1797,7 @@ void VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader
 			}
 			uniformSize = std::min<uint32>(uniformSize, buf.size);
 
-			cemu_assert_debug(physicalAddr < 0x50000000);
+			cemu_assert_debug(physicalAddr >= m_importedMemBaseAddress && physicalAddr - m_importedMemBaseAddress < mmuRange_MEM2.getSize());
 
 			uint32 bufferIndex = i;
 			cemu_assert_debug(bufferIndex < 16);
@@ -1800,12 +1805,15 @@ void VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader
 			switch (shaderType)
 			{
 			case LatteConst::ShaderType::Vertex:
+				changed |= dynamicOffsetInfo.shaderUB[VulkanRendererConst::SHADER_STAGE_INDEX_VERTEX].uniformBufferOffset[bufferIndex] != physicalAddr - m_importedMemBaseAddress;
 				dynamicOffsetInfo.shaderUB[VulkanRendererConst::SHADER_STAGE_INDEX_VERTEX].uniformBufferOffset[bufferIndex] = physicalAddr - m_importedMemBaseAddress;
 				break;
 			case LatteConst::ShaderType::Geometry:
+				changed |= dynamicOffsetInfo.shaderUB[VulkanRendererConst::SHADER_STAGE_INDEX_GEOMETRY].uniformBufferOffset[bufferIndex] != physicalAddr - m_importedMemBaseAddress;
 				dynamicOffsetInfo.shaderUB[VulkanRendererConst::SHADER_STAGE_INDEX_GEOMETRY].uniformBufferOffset[bufferIndex] = physicalAddr - m_importedMemBaseAddress;
 				break;
 			case LatteConst::ShaderType::Pixel:
+				changed |= dynamicOffsetInfo.shaderUB[VulkanRendererConst::SHADER_STAGE_INDEX_FRAGMENT].uniformBufferOffset[bufferIndex] != physicalAddr - m_importedMemBaseAddress;
 				dynamicOffsetInfo.shaderUB[VulkanRendererConst::SHADER_STAGE_INDEX_FRAGMENT].uniformBufferOffset[bufferIndex] = physicalAddr - m_importedMemBaseAddress;
 				break;
 			default:
@@ -1813,6 +1821,7 @@ void VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader
 			}
 		}
 	}
+	return changed;
 }
 
 void VulkanRenderer::draw_endSequence()

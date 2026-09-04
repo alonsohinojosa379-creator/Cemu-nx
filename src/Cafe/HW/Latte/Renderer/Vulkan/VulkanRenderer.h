@@ -550,7 +550,7 @@ private:
 	void draw_endSequence() override;
 
 	void draw_updateVertexBuffersDirectAccess();
-	void draw_updateUniformBuffersDirectAccess(LatteDecompilerShader* shader, const uint32 uniformBufferRegOffset, LatteConst::ShaderType shaderType);
+	bool draw_updateUniformBuffersDirectAccess(LatteDecompilerShader* shader, const uint32 uniformBufferRegOffset, LatteConst::ShaderType shaderType);
 
 	void draw_prepareDynamicOffsetsForDescriptorSet(uint32 shaderStageIndex, uint32* dynamicOffsets, sint32& numDynOffsets, const PipelineInfo* pipeline_info);
 	VkDescriptorSetInfo* draw_getOrCreateDescriptorSet(PipelineInfo* pipeline_info, LatteDecompilerShader* shader);
@@ -654,11 +654,18 @@ private:
 
 	// if VK_EXT_external_memory_host is supported we can (optionally) import all of the Wii U memory into a Vulkan memory object
 	// this allows us to skip any vertex/uniform caching logic and let the GPU directly read the memory from main RAM
-	// Wii U memory imported into a buffer
-	static constexpr bool m_useHostMemoryForCache{ false }; // currently disabled and made constexpr so the compiler eliminates the branches that will never be taken
+	bool m_useHostMemoryForCache{ false };
 	VkBuffer m_importedMem = VK_NULL_HANDLE;
 	VkDeviceMemory m_importedMemMemory = VK_NULL_HANDLE;
 	MPTR m_importedMemBaseAddress = 0;
+#if defined(__SWITCH__)
+	struct HostMemoryWrite
+	{
+		uint64 commandBufferId;
+		VkDeviceSize offset, size;
+	};
+	std::vector<HostMemoryWrite> m_hostMemoryWrites;
+#endif
 
 	// command buffer, garbage collection, synchronization
 #if defined(__SWITCH__)

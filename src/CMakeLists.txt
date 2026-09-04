@@ -85,6 +85,7 @@ if(PLATFORM_SWITCH)
 
 	add_executable(CemuBin
 		platform/switch/main_switch.cpp
+		platform/switch/SwitchStartup.cpp
 		platform/switch/WindowSystemSwitch.cpp
 		platform/switch/SwitchRenderer.cpp
 		platform/switch/SwitchJit.cpp
@@ -279,6 +280,10 @@ endif()
 
 if (PLATFORM_SWITCH)
 	set(SWITCH_LTO_JOBS "auto" CACHE STRING "Parallel GCC LTO jobs for the Switch link")
+	# Reserve guest VA after libnx has carved argument storage out of the heap,
+	# but before __appInit starts services. argvSetup is defined in a separate
+	# libnx object, so --wrap redirects the call from its runtime init object.
+	target_link_options(CemuBin PRIVATE "-Wl,--wrap=argvSetup")
 	# The headless build still consumes fonts through imgui.
 	target_link_libraries(CemuBin PRIVATE SwitchVulkanDriver SwitchLsfgBackend imguiImpl
 		smb2 libusbhsfs

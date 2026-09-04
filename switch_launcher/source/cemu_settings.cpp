@@ -460,6 +460,7 @@ bool cemu_writeSettingsXml(const char *path, const std::vector<CemuKV> &s,
   ei(g, "api", nativeVulkan ? 1 : 0);
   ei(g, "VSync", gi("VSync", 0));
   es(g, "vkAccurateBarriers", gb("vkAccurateBarriers", true));
+  es(g, "vkHostMemoryImport", "true"); // mandatory on Cemu NX
   ei(g, "UpscaleFilter", gi("UpscaleFilter", 1));
   ei(g, "DownscaleFilter", gi("DownscaleFilter", 0));
   ei(g, "FullscreenScaling", gi("FullscreenScaling", 0));

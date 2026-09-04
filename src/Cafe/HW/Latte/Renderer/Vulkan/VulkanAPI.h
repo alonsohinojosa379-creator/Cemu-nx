@@ -256,6 +256,9 @@ VKFUNC_DEVICE(vkCreateDescriptorPool);
 VKFUNC_DEVICE(vkDestroyDescriptorPool);
 VKFUNC_DEVICE(vkDestroyDescriptorSetLayout);
 
+// VK_EXT_external_memory_host
+VKFUNC_DEVICE(vkGetMemoryHostPointerPropertiesEXT);
+
 #undef VKFUNC_INIT
 #undef VKFUNC_INSTANCE_INIT
 #undef VKFUNC_DEVICE_INIT

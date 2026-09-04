@@ -4,10 +4,14 @@
 #include <mutex>
 #include <map>
 #include <vector>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "platform/switch/SwitchMemoryBudget.h"
+#include "util/MemMapper/SwitchGuestMemory.h"
+#include "Cemu/Logging/CemuLogging.h"
+#include "platform/switch/common/SwitchLaunchPolicy.h"
 
 // Dedicated backing for sparse guest mappings.
 extern void* g_switchGuestPoolBase;
@@ -52,13 +56,18 @@ namespace MemMapper
 			bool heapSource;
 		};
 		std::map<uintptr_t, DirectAllocation> s_directAllocations;
-		struct AddressReservation
-		{
-			void* base;
-			size_t size;
-			VirtmemReservation* reservation;
-		};
+		using AddressReservation = SwitchGuestMemory::Reservation;
 		std::vector<AddressReservation> s_reservations;
+		struct StackMap
+		{
+			void* dst;
+			size_t size;
+			void* source;
+		};
+		std::vector<StackMap> s_stackMaps;
+		char s_guestBackingNote[256] = "MEM2 not committed yet";
+		bool s_guestStackPlacement = false;
+		bool s_guestImportRequired = true;
 		uintptr_t s_reserveBase = 0;
 		size_t s_reserveSize = 0;
 		uintptr_t s_instBase = 0, s_instEnd = 0;
@@ -207,7 +216,9 @@ namespace MemMapper
 				releaseSource();
 				return false;
 			}
+			virtmemLock();
 			rc = svcControlCodeMemory(handle, CodeMapOperation_MapOwner, dst, size, Perm_Rw);
+			virtmemUnlock();
 			if (R_FAILED(rc))
 			{
 				svcCloseHandle(handle);
@@ -254,10 +265,48 @@ namespace MemMapper
 			}
 		}
 
+		bool stackMapped(void* dst)
+		{
+			for (const StackMap& mapping : s_stackMaps)
+				if (mapping.dst == dst)
+					return true;
+			return false;
+		}
+
+		bool stackCommit(void* dst, size_t size)
+		{
+			if ((reinterpret_cast<uintptr_t>(dst) & (kPageSize - 1)) != 0 || !alignToPage(size, size))
+				return false;
+			void* source = nullptr;
+			if (!takePoolSource(size, source))
+			{
+				std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote),
+					"MEM2 mapping failed (no pool run for %lluMB)", (unsigned long long)(size >> 20));
+				return false;
+			}
+			const Result rc = svcMapMemory(dst, source, size);
+			if (R_FAILED(rc))
+			{
+				releasePoolSource(source, size);
+				std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote),
+					"MEM2 mapping failed (svcMapMemory(0x%llx, %lluMB) rc=0x%08x)",
+					(unsigned long long)reinterpret_cast<uintptr_t>(dst),
+					(unsigned long long)(size >> 20), static_cast<unsigned>(rc));
+				return false;
+			}
+			s_stackMaps.push_back({dst, size, source});
+			std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote),
+				"svcMapMemory alias at 0x%llx (%lluMB), readable by the GPU",
+				(unsigned long long)reinterpret_cast<uintptr_t>(dst), (unsigned long long)(size >> 20));
+			return true;
+		}
+
 		// Coalescing adjacent ranges conserves Horizon kernel objects.
 		struct Zone { uintptr_t start, end; };
+		constexpr uintptr_t kMem2Start = 0x10000000;
 		const Zone kZones[] = {
-			{0x00010000, 0x50000000},     // LOW0 + TRAMPOLINE + CODECAVE + TEXT + CEMU + MEM2
+			{0x00010000, 0x10000000},     // LOW0 + TRAMPOLINE + CODECAVE + TEXT + CEMU
+			{0x10000000, 0x50000000},     // MEM2, the only zone the GPU reads
 			{0xF4000000, 0xFA000000},     // MEM1 + RPLLOADER + SHARED
 			{0xFFC00000, 0x100000000ull}, // CORE0/1/2 locked cache + PER-CORE
 		};
@@ -270,16 +319,28 @@ namespace MemMapper
 				if (off < z.start || off >= z.end)
 					continue;
 				void* zoneDst = (void*)(s_reserveBase + z.start);
-				bool haveZone = false;
-				for (const PoolMap& mapping : s_poolMaps)
+				const size_t zoneSize = z.end - z.start;
+				const bool isMem2 = z.start == kMem2Start;
+				bool haveZone = isMem2 && stackMapped(zoneDst);
+				if (!haveZone)
 				{
-					if (mapping.dst == zoneDst)
+					for (const PoolMap& mapping : s_poolMaps)
 					{
-						haveZone = true;
-						break;
+						if (mapping.dst == zoneDst)
+						{
+							haveZone = true;
+							break;
+						}
 					}
 				}
-				if (!haveZone && !poolCommit(zoneDst, z.end - z.start, false, true, false))
+				// Only the stack region accepts svcMapMemory destinations.
+				if (!haveZone && isMem2 && s_guestImportRequired)
+				{
+					if (!s_guestStackPlacement || !stackCommit(zoneDst, zoneSize))
+						throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, s_guestBackingNote);
+					haveZone = true;
+				}
+				if (!haveZone && !poolCommit(zoneDst, zoneSize, false, true, false))
 					return false;
 
 				const uintptr_t requestEnd = off + size;
@@ -347,14 +408,55 @@ namespace MemMapper
 		size_t alignedSize = 0;
 		if (!alignToPage(size, alignedSize))
 			return nullptr;
-		VirtmemReservation* reservation = nullptr;
-		void* p = virtReserve(baseAddr, alignedSize, reservation);
+		AddressReservation reservation{};
+		const bool isGuest = !baseAddr && alignedSize == SwitchGuestMemoryLayout::GuestSize;
+		bool stackPlacement = false;
+		if (isGuest && s_guestImportRequired)
+		{
+			reservation = SwitchGuestMemory::TakeEarly();
+			stackPlacement = reservation.base != nullptr;
+			if (!stackPlacement)
+			{
+				std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote), "MEM2 window unavailable: %s",
+					SwitchGuestMemory::DescribeEarlyReservation());
+				throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, s_guestBackingNote);
+			}
+			std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote), "early MEM2 stack window adopted; not committed yet");
+		}
+		else if (isGuest)
+		{
+			std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote),
+				"pool pages; the GPU reads through the buffer cache");
+		}
+		if (!reservation.base)
+		{
+			reservation.base = virtReserve(baseAddr, alignedSize, reservation.handles[0]);
+			reservation.size = alignedSize;
+		}
+		void* p = reservation.base;
 		if (p)
 		{
-			s_reservations.push_back({p, alignedSize, reservation});
-			if (size >= 0x80000000ull) { s_reserveBase = (uintptr_t)p; s_reserveSize = alignedSize; }
+			try
+			{
+				s_reservations.push_back(reservation);
+			}
+			catch (...)
+			{
+				SwitchGuestMemory::Release(reservation);
+				throw;
+			}
+			if (size >= 0x80000000ull)
+			{
+				s_reserveBase = (uintptr_t)p;
+				s_reserveSize = alignedSize;
+				s_guestStackPlacement = stackPlacement;
+			}
 			else { s_instBase = (uintptr_t)p; s_instEnd = (uintptr_t)p + alignedSize; }
 		}
+		if (isGuest)
+			SwitchGuestMemory::PrintDiagnostics([](void*, const char* line) {
+				cemuLog_log(LogType::Force, "{}", line);
+			}, nullptr);
 		return p;
 	}
 
@@ -375,11 +477,18 @@ namespace MemMapper
 				if (mapBegin >= begin && mapBegin - begin < alignedSize)
 					return;
 			}
-			virtmemLock();
-			virtmemRemoveReservation(it->reservation);
-			virtmemUnlock();
+			for (const StackMap& mapping : s_stackMaps)
+			{
+				const uintptr_t mapBegin = reinterpret_cast<uintptr_t>(mapping.dst);
+				if (mapBegin >= begin && mapBegin - begin < alignedSize)
+					return;
+			}
+			SwitchGuestMemory::Release(*it);
 			if (begin == s_reserveBase)
+			{
 				s_reserveBase = s_reserveSize = 0;
+				s_guestStackPlacement = false;
+			}
 			if (begin == s_instBase)
 				s_instBase = s_instEnd = 0;
 			s_reservations.erase(it);
@@ -417,9 +526,32 @@ namespace MemMapper
 			directRelease(baseAddr);
 	}
 
-	void Shutdown()
+	const char* DescribeGuestBacking()
+	{
+		return s_guestBackingNote;
+	}
+
+	void SetGuestMemoryImportRequired(bool required)
 	{
 		std::lock_guard<std::mutex> lock(s_mutex);
+		s_guestImportRequired = required;
+		if (!required)
+			SwitchGuestMemory::DiscardEarly("the OpenGL renderer copies guest data instead");
+	}
+
+	void Shutdown()
+	{
+		SwitchGuestMemory::DiscardEarly("mapper shutdown before adoption");
+		std::lock_guard<std::mutex> lock(s_mutex);
+		for (size_t i = 0; i < s_stackMaps.size();)
+		{
+			if (R_FAILED(svcUnmapMemory(s_stackMaps[i].dst, s_stackMaps[i].source, s_stackMaps[i].size)))
+			{
+				++i;
+				continue;
+			}
+			s_stackMaps.erase(s_stackMaps.begin() + i);
+		}
 		for (size_t i = 0; i < s_poolMaps.size();)
 		{
 			const PoolMap mapping = s_poolMaps[i];
@@ -435,7 +567,7 @@ namespace MemMapper
 			s_poolMaps.erase(s_poolMaps.begin() + i);
 		}
 
-		if (!s_poolMaps.empty())
+		if (!s_poolMaps.empty() || !s_stackMaps.empty())
 			return;
 
 		for (const auto& [address, allocation] : s_directAllocations)
@@ -445,12 +577,12 @@ namespace MemMapper
 		}
 		s_directAllocations.clear();
 
-		virtmemLock();
-		for (const AddressReservation& reservation : s_reservations)
-			virtmemRemoveReservation(reservation.reservation);
-		virtmemUnlock();
+		for (AddressReservation& reservation : s_reservations)
+			SwitchGuestMemory::Release(reservation);
 		s_reservations.clear();
 
+		s_guestStackPlacement = false;
+		std::snprintf(s_guestBackingNote, sizeof(s_guestBackingNote), "MEM2 not committed yet");
 		s_poolInit = false;
 		s_poolCursor = 0;
 		s_poolEnd = 0;

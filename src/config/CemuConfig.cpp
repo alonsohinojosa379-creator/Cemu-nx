@@ -147,6 +147,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	h264_hardware_decode = graphic.get("H264HardwareDecode", true);
 #endif
 	vk_accurate_barriers = graphic.get("vkAccurateBarriers", true); // this used to be "VulkanAccurateBarriers" but because we changed the default to true in 1.27.1 the option name had to be changed
+	vk_host_memory_import = graphic.get("vkHostMemoryImport", false);
 #ifdef ENABLE_METAL
 	force_mesh_shaders = graphic.get("ForceMeshShaders", false);
 #endif
@@ -383,6 +384,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	graphic.set("H264HardwareDecode", h264_hardware_decode.GetValue());
 #endif
 	graphic.set("vkAccurateBarriers", vk_accurate_barriers);
+	graphic.set("vkHostMemoryImport", vk_host_memory_import);
 
 	auto overlay_node = graphic.set("Overlay");
 	overlay_node.set("Position", overlay.position);

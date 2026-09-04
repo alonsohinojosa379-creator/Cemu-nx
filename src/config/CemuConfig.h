@@ -459,6 +459,7 @@ struct CemuConfig
 	ConfigValue<float> userDisplayGamma { 2.2f }; // 0 = sRGB, >0 gamma
 
 	ConfigValue<bool> vk_accurate_barriers{ true };
+	ConfigValue<bool> vk_host_memory_import{ false };
 
 	struct
 	{

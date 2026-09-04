@@ -21,6 +21,8 @@
 #if defined(__SWITCH__)
 #include "platform/switch/SwitchMemoryBudget.h"
 #include "platform/switch/SwitchPlatform.h"
+#include "platform/switch/common/SwitchLaunchPolicy.h"
+#include <exception>
 void SwitchRendererThreadExit();
 #endif
 
@@ -28,6 +30,10 @@ LatteGPUState_t LatteGPUState = {};
 
 std::atomic_bool sLatteThreadRunning = false;
 std::atomic_bool sLatteThreadFinishedInit = false;
+
+#if defined(__SWITCH__)
+static std::exception_ptr sLatteInitError;
+#endif
 
 void LatteThread_Exit();
 
@@ -174,7 +180,20 @@ int Latte_ThreadEntry()
 #if defined(__SWITCH__)
 	bufferCacheSize = SwitchMemoryBudget_GetBufferCacheSize();
 #endif
+#if defined(__SWITCH__)
+	try
+	{
+		LatteBufferCache_init(bufferCacheSize);
+	}
+	catch (...)
+	{
+		sLatteInitError = std::current_exception();
+		sLatteThreadFinishedInit.store(true, std::memory_order_release);
+		return 0;
+	}
+#else
 	LatteBufferCache_init(bufferCacheSize);
+#endif
 	LatteQuery_Init();
 	LatteSHRC_Init();
 	LatteStreamout_InitCache();
@@ -276,12 +295,43 @@ void Latte_Start()
 	cemu_assert_debug(!sLatteThreadRunning);
 	sLatteThreadRunning = true;
 	sLatteThreadFinishedInit = false;
+#if defined(__SWITCH__)
+	sLatteInitError = nullptr;
+#endif
 	sLatteThread = std::thread(Latte_ThreadEntry);
 	// wait until initialized
-	while (!sLatteThreadFinishedInit)
+	while (!sLatteThreadFinishedInit.load(std::memory_order_acquire))
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
+#if defined(__SWITCH__)
+	if (sLatteInitError)
+	{
+		sLatteThread.join();
+		sLatteThreadRunning = false;
+		_lock.unlock();
+		g_renderer->Shutdown();
+		LatteTC_UnloadAllTextures();
+		RendererOutputShader::ShutdownStatic();
+		Renderer* renderer = g_renderer.get();
+		delete renderer; // its destructor still consults g_renderer
+		g_renderer.release();
+		SwitchRendererThreadExit();
+		try
+		{
+			std::rethrow_exception(sLatteInitError);
+		}
+		catch (const SwitchLaunch::Failure&) { throw; }
+		catch (const std::exception& error)
+		{
+			throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, error.what());
+		}
+		catch (...)
+		{
+			throw SwitchLaunch::Failure(SwitchLaunch::Error::HostMemoryUnavailable, "Unknown host-memory initialization failure");
+		}
+	}
+#endif
 }
 
 void Latte_Stop()

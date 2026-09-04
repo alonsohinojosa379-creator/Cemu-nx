@@ -48,6 +48,7 @@ if(PLATFORM_SWITCH)
 	# Thread affinity policy: referenced from CemuCafe and CemuAudio, so it has
 	# to live in a library both of them link rather than in the executable.
 	target_sources(CemuCommon PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/switch/SwitchThread.cpp)
+	target_sources(CemuCommon PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/switch/SwitchMemory.cpp)
 	# Keep the libnx exception-stack override out of GCC LTO.
 	set_property(SOURCE ExceptionHandler/ExceptionHandler_switch.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
 else()

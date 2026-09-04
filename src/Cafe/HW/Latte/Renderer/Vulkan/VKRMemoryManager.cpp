@@ -833,37 +833,66 @@ bool VKRMemoryManager::CreateBufferFromHostMemory(void* hostPointer, VkDeviceSiz
 
 	VkMemoryRequirements memRequirements;
 	vkGetBufferMemoryRequirements(m_vkr->GetLogicalDevice(), buffer, &memRequirements);
+	if (memRequirements.size > size)
+	{
+		cemuLog_log(LogType::Force, "Host memory import: buffer requires {} bytes but host allocation has {}", memRequirements.size, size);
+		vkDestroyBuffer(m_vkr->GetLogicalDevice(), buffer, nullptr);
+		buffer = VK_NULL_HANDLE;
+		return false;
+	}
+
+	VkMemoryHostPointerPropertiesEXT hostPointerProps{};
+	hostPointerProps.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT;
+	const VkResult hostPtrResult = vkGetMemoryHostPointerPropertiesEXT(m_vkr->GetLogicalDevice(),
+		VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, hostPointer, &hostPointerProps);
+	if (hostPtrResult != VK_SUCCESS)
+	{
+		cemuLog_log(LogType::Force, "Host memory import: driver rejected the pointer (result {})", (sint32)hostPtrResult);
+		vkDestroyBuffer(m_vkr->GetLogicalDevice(), buffer, nullptr);
+		buffer = VK_NULL_HANDLE;
+		return false;
+	}
+	const uint32 usableTypes = memRequirements.memoryTypeBits & hostPointerProps.memoryTypeBits;
+	cemuLog_log(LogType::Force, "Host memory import: buffer types 0x{:08x}, pointer types 0x{:08x}, usable 0x{:08x}",
+			memRequirements.memoryTypeBits, hostPointerProps.memoryTypeBits, usableTypes);
+	if (usableTypes == 0)
+	{
+		cemuLog_log(LogType::Force, "Host memory import: no memory type can back this pointer");
+		vkDestroyBuffer(m_vkr->GetLogicalDevice(), buffer, nullptr);
+		buffer = VK_NULL_HANDLE;
+		return false;
+	}
 
 	VkMemoryAllocateInfo allocInfo{};
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.allocationSize = size;
 
 	VkImportMemoryHostPointerInfoEXT importHostMem{};
 	importHostMem.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT;
 	importHostMem.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
 	importHostMem.pHostPointer = hostPointer;
-	// VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT or
-	// VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_MAPPED_FOREIGN_MEMORY_BIT_EXT
-	// whats the difference ?
 
 	allocInfo.pNext = &importHostMem;
 
-	if (!FindMemoryType(memRequirements.memoryTypeBits, properties, allocInfo.memoryTypeIndex))
+	if (!FindMemoryType(usableTypes, properties, allocInfo.memoryTypeIndex))
 	{
+		cemuLog_log(LogType::Force, "Host memory import: no usable type satisfies the requested properties");
 		vkDestroyBuffer(m_vkr->GetLogicalDevice(), buffer, nullptr);
+		buffer = VK_NULL_HANDLE;
 		return false;
 	}
 	const VkResult allocateResult = vkAllocateMemory(m_vkr->GetLogicalDevice(), &allocInfo, nullptr, &bufferMemory);
 	if (allocateResult != VK_SUCCESS)
 	{
+		cemuLog_log(LogType::Force, "Host memory import: vkAllocateMemory failed (result {}) on memory type {}", (sint32)allocateResult, allocInfo.memoryTypeIndex);
 		vkDestroyBuffer(m_vkr->GetLogicalDevice(), buffer, nullptr);
+		buffer = VK_NULL_HANDLE;
 		return false;
 	}
 	const VkResult bindResult = vkBindBufferMemory(m_vkr->GetLogicalDevice(), buffer, bufferMemory, 0);
 	if (bindResult != VK_SUCCESS)
 	{
-		vkFreeMemory(m_vkr->GetLogicalDevice(), bufferMemory, nullptr);
-		vkDestroyBuffer(m_vkr->GetLogicalDevice(), buffer, nullptr);
+		DeleteBuffer(buffer, bufferMemory);
 		cemuLog_log(LogType::Force, "Failed to bind buffer (CreateBufferFromHostMemory)");
 		return false;
 	}

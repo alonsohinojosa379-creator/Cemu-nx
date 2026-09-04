@@ -23,6 +23,9 @@ namespace MemMapper
 	void FreeMemory(void* baseAddr, size_t size, bool fromReservation = false);
 
 #if defined(__SWITCH__)
+	const char* DescribeGuestBacking();
+	// OpenGL copies guest data into GL buffers, so only Vulkan needs the import.
+	void SetGuestMemoryImportRequired(bool required);
 	void Shutdown();
 #endif
 };
