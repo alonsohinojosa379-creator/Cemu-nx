@@ -520,6 +520,8 @@ void PPCRecompiler_recompileAtAddress(uint32 address)
 void PPCRecompiler_thread()
 {
 	SetThreadName("PPCRecompiler");
+#if defined(__SWITCH__)
+#endif
 #if PPCREC_FORCE_SYNCHRONOUS_COMPILATION
 	return;
 #endif

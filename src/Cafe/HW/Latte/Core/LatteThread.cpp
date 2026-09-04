@@ -158,6 +158,8 @@ void LatteThread_HandleOSScreen()
 int Latte_ThreadEntry()
 {
 	SetThreadName("LatteThread");
+#if defined(__SWITCH__)
+#endif
 	sint32 w,h;
 	WindowSystem::GetWindowPhysSize(w,h);
 

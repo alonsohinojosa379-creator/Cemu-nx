@@ -1,4 +1,7 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanPipelineCompiler.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanPipelineStableCache.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
@@ -448,6 +451,9 @@ bool VulkanPipelineStableCache::DeserializePipeline(MemStreamReader& memReader, 
 int VulkanPipelineStableCache::CompilerThread()
 {
 	SetThreadName("plCacheCompiler");
+#if defined(__SWITCH__)
+	SwitchThread_AllowHelperCore("pipeline cache compiler");
+#endif
 	while (m_numCompilationThreads != 0)
 	{
 		std::vector<uint8> pipelineData = m_compilationQueue.pop();
@@ -464,6 +470,9 @@ int VulkanPipelineStableCache::CompilerThread()
 void VulkanPipelineStableCache::WorkerThread()
 {
 	SetThreadName("plCacheWriter");
+#if defined(__SWITCH__)
+	SwitchThread_AllowHelperCore("pipeline cache writer");
+#endif
 	while (true)
 	{
 		CachedPipeline* job = m_pipelineCachingQueue.pop();

@@ -174,6 +174,16 @@ static bool queryRegularFile(const std::string &path, bool &exists) {
   return errno == ENOENT;
 }
 
+static int allowedCpuCores() {
+  u64 mask = 0;
+  if (R_FAILED(svcGetInfo(&mask, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0)))
+    return 3;
+  int cores = 0;
+  for (int core = 0; core < 4; core++)
+    if (mask & (UINT64_C(1) << core)) cores++;
+  return cores ? cores : 3;
+}
+
 static bool regularFileExists(const std::string &path) {
   bool exists = false;
   return queryRegularFile(path, exists) && exists;
@@ -261,6 +271,7 @@ struct Opt {
 #define O_RANGE(l,k,lo,hi,s,d) { l, k, OT_RANGE,  nullptr,0, lo,hi,s, d }
 #define O_ACTION(l)            { l, nullptr, OT_ACTION, nullptr,0, 0,0,0, nullptr }
 #define O_STATUS(l)            { l, nullptr, OT_STATUS, nullptr,0, 0,0,0, nullptr }
+#define O_STATUS_KEY(l,k)      { l, k, OT_STATUS, nullptr,0, 0,0,0, nullptr }
 
 static const Choice C_cpumode[]  = { {"Multi-core recompiler","3"}, {"Single-core recompiler","1"},
                                      {"Interpreter (slow)","0"} };
@@ -312,6 +323,7 @@ static const Opt S_cpu[] = {
   O_CHOICE("CPU mode",         "cpuMode",       C_cpumode, "3"),
   O_CHOICE("CPU timer speed",  "TimerShiftFactor", C_timer, "3"),
   O_CHOICE("Hardware video decoding",  "H264HardwareDecode", C_bool,    "true"),
+  O_STATUS_KEY("CPU cores",    "cpu-cores"),
 };
 static const Opt S_graphics[] = {
   O_CHOICE("Renderer",              "Wrapper/Renderer", C_backend, "vk"),
@@ -492,6 +504,9 @@ static SettingHelpInfo settingHelpFor(const Opt &option) {
   if(option.type==OT_ACTION && option.label && !strcmp(option.label,"Control mapping"))
     return {"Controller mapping",
             "Opens the press-to-bind screen for every Wii U controller input. Select a control, then press the Switch button or trigger that should activate it."};
+  if(option.type==OT_STATUS && option.key && !strcmp(option.key,"cpu-cores"))
+    return {"Measured value",
+            "How many of the console's four CPU cores this process is allowed to use. A HOME Menu shortcut grants all four; launching through the album applet grants three and leaves core 3 idle. Install the shortcut from the applet-mode installer to get the fourth core."};
   if(option.type==OT_STATUS)
     return {"Required component",
             "Shows whether the Lossless Scaling frame-generation library is installed. LSFG cannot be enabled until Lossless.dll is copied to sdmc:/switch/cemu/lsfg/."};
@@ -528,7 +543,7 @@ static void commitAll() {
   for (int s = 0; s < SCR_COUNT; s++)
     for (int i = 0; i < g_screens[s].n; i++) {
       const Opt &o = g_screens[s].opts[i];
-      if (!o.key) continue;
+      if (o.type == OT_STATUS || !o.key || !o.def) continue;
       std::string v = iniGet(o.key, o.def);
       iniSet(o.key, v.c_str());
     }
@@ -4120,7 +4135,10 @@ static void optValue(const Opt &o, char *out, int n) {
     else snprintf(out,n,"%s", iniGet(o.key,o.def));
   }
   else if (o.type==OT_ACTION) snprintf(out,n,">");
-  else if (o.type==OT_STATUS) snprintf(out,n,"%s",regularFileExists(LSFG_DLL_FILE)?"Installed":"Missing");
+  else if (o.type==OT_STATUS){
+    if(o.key&&!strcmp(o.key,"cpu-cores")) snprintf(out,n,"%d / 4",allowedCpuCores());
+    else snprintf(out,n,"%s",regularFileExists(LSFG_DLL_FILE)?"Installed":"Missing");
+  }
 }
 static void optAdjust(const Opt &o, int dir) {
   if (o.type==OT_CHOICE){ int i=choiceIdx(o); if(i<0)i=0; i=(i+dir+o.nch)%o.nch; iniSet(o.key,o.ch[i].val); }
@@ -4268,8 +4286,11 @@ static void renderSettings(int scr,int sel,int top,const char *ctx){
     const bool enabled=optionEnabled(scr,S.opts[i]);
     SDL_Color lc = enabled?(cur?COL_VAL:COL_TXT):(SDL_Color){92,98,110,255};
     SDL_Color vc = enabled?(cur?COL_VAL:COL_DIM):(SDL_Color){92,98,110,255};
-    if(S.opts[i].type==OT_STATUS)
-      vc=regularFileExists(LSFG_DLL_FILE)?(SDL_Color){120,220,120,255}:(SDL_Color){235,125,115,255};
+    if(S.opts[i].type==OT_STATUS){
+      const bool ok=(S.opts[i].key&&!strcmp(S.opts[i].key,"cpu-cores"))
+        ? allowedCpuCores()>=4 : regularFileExists(LSFG_DLL_FILE);
+      vc=ok?(SDL_Color){120,220,120,255}:(SDL_Color){235,125,115,255};
+    }
     drawText(g_font,labelX,y,LauncherLocalization::Translate(S.opts[i].label).data(),lc);
     char v[96]; optValue(S.opts[i],v,sizeof(v));
     drawTextR(g_font,valX,y,v,vc);

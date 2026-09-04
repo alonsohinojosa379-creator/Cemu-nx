@@ -13,6 +13,7 @@
 #include "SwitchPlatform.h"
 #include "SwitchMemoryBudget.h"
 #include "common/SwitchStorage.h"
+#include "platform/switch/SwitchThread.h"
 
 std::atomic_bool g_isGPUInitFinished = false;
 
@@ -201,6 +202,8 @@ static std::string ReadLaunchGamePath()
 
 static bool SwitchPlatformInit()
 {
+	// Before anything else spawns a thread: new threads inherit this mask.
+	SwitchThread_RestoreProcessAffinity();
 	s_romfsMounted = R_SUCCEEDED(romfsInit());
 	s_hidInitialized = R_SUCCEEDED(hidInitialize());
 	if (s_hidInitialized)

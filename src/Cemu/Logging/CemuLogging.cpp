@@ -1,4 +1,7 @@
 #include "CemuLogging.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
 #include "Common/precompiled.h"
 #include "util/helpers/helpers.h"
 #include "config/CemuConfig.h"
@@ -132,6 +135,9 @@ bool cemuLog_advancedPPCLoggingEnabled()
 void cemuLog_thread()
 {
 	SetThreadName("cemuLog_thread");
+#if defined(__SWITCH__)
+	SwitchThread_AllowHelperCore("log writer");
+#endif
 	while (true)
 	{
 		std::unique_lock lock(LogContext.log_mutex);
@@ -160,10 +166,7 @@ fs::path cemuLog_GetLogFilePath()
 
 void cemuLog_createLogFile(bool triggeredByCrash)
 {
-#if defined(__SWITCH__)
 	(void)triggeredByCrash;
-	return;
-#endif
 	std::unique_lock lock(LogContext.log_mutex);
 	if (LogContext.file_stream.is_open())
 		return;
@@ -183,12 +186,6 @@ void cemuLog_createLogFile(bool triggeredByCrash)
 
 void cemuLog_writeLineToLog(std::string_view text, bool date, bool new_line)
 {
-#if defined(__SWITCH__)
-	(void)text;
-	(void)date;
-	(void)new_line;
-	return;
-#endif
 	std::unique_lock lock(LogContext.log_mutex);
 
 	if (date)
@@ -258,9 +255,6 @@ void cemuLog_logHexDump(LogType type, const void* data, size_t size, size_t line
 
 void cemuLog_waitForFlush()
 {
-#if defined(__SWITCH__)
-	return;
-#endif
 	cemuLog_createLogFile(false);
 	std::unique_lock lock(LogContext.log_mutex);
 	while(!LogContext.text_cache.empty())

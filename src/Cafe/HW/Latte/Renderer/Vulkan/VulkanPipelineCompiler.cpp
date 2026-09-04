@@ -1,4 +1,7 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanPipelineCompiler.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanPipelineStableCache.h"
@@ -1080,6 +1083,9 @@ static ConcurrentQueue<PipelineCompiler*> s_pipelineCompileRequests;
 static void compilePipeline_thread(sint32 threadIndex)
 {
 	SetThreadName("compilePl");
+#if defined(__SWITCH__)
+	SwitchThread_AllowHelperCore("pipeline compiler");
+#endif
 #ifdef _WIN32
 	// to avoid starving the main cpu and render threads the pipeline compile threads run at lower priority
 	// except for one thread which we always run at normal priority to prevent the opposite scenario where all compile threads are starved

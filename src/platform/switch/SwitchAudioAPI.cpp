@@ -4,6 +4,8 @@ extern "C" {
 #include <switch/services/audout.h>
 }
 
+#include "platform/switch/SwitchThread.h"
+
 #include <algorithm>
 #include <array>
 #include <condition_variable>
@@ -212,6 +214,7 @@ class SwitchAudioMixer
 	void WorkerMain()
 	{
 		SetThreadName("SwitchAudio");
+		SwitchThread_PinToHelperCore("audio mixer", 43);
 		std::unique_lock lock(m_mutex);
 		while (!m_workerShutdown)
 		{

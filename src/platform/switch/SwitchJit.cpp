@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "platform/switch/SwitchJit.h"
+#include "Cemu/Logging/CemuLogging.h"
 
 namespace
 {
@@ -262,7 +263,9 @@ void* SwitchJit_RwToRx(void* rw)
 
 void SwitchJit_PinThreadToCore(int coreIndex)
 {
-	if (coreIndex < 0 || coreIndex > 2)
+	if (coreIndex < 0 || coreIndex > 3)
 		return;
-	svcSetThreadCoreMask(CUR_THREAD_HANDLE, coreIndex, 1u << coreIndex);
+	const Result result = svcSetThreadCoreMask(CUR_THREAD_HANDLE, coreIndex, 1u << coreIndex);
+	if (R_FAILED(result))
+		cemuLog_log(LogType::Force, "Switch: could not pin a thread to core {} (rc=0x{:08x})", coreIndex, result);
 }

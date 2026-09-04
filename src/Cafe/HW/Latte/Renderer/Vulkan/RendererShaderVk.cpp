@@ -1,4 +1,7 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/RendererShaderVk.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
 #include "config/ActiveSettings.h"
@@ -160,6 +163,9 @@ public:
 	void CompilerThreadFunc()
 	{
 		SetThreadName("vkShaderComp");
+#if defined(__SWITCH__)
+		SwitchThread_AllowHelperCore("shader compiler");
+#endif
 		while (m_threadsActive.load(std::memory_order::relaxed))
 		{
 			s_compilationQueueCount.decrementWithWait();

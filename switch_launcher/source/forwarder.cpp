@@ -626,13 +626,21 @@ bool patch_npdm(std::vector<u8> &npdm, u64 tid)
     acid.program_id_min = tid;
     acid.program_id_max = tid;
 
-    // Atmosphere 1.8+ requires bit 19 in both KAC sections.
-    u64 ver{};
-    if (R_SUCCEEDED(splInitialize())) {
-        splGetConfig((SplConfigItem)65000 /* ExosphereVersion */, &ver);
+    constexpr u32 kernel_flags_four_core = ((((3u << 8) | 0u) << 6 | 28u) << 6 | 63u) << 4;
+    static_assert((kernel_flags_four_core | 0x7) == 0x030073F7);
+    if (!npdm_patch_kc(npdm, static_cast<u32>(aciKacOffset), aci0.kac_size, 3, kernel_flags_four_core) ||
+        !npdm_patch_kc(npdm, static_cast<u32>(acidKacOffset), acid.kac_size, 3, kernel_flags_four_core))
+        return false;
+
+    u64 raw_ver = 0;
+    Result spl_rc = splInitialize();
+    if (R_SUCCEEDED(spl_rc)) {
+        spl_rc = splGetConfig((SplConfigItem)65000 /* ExosphereApiVersion */, &raw_ver);
         splExit();
     }
-    ver >>= 40;
+    if (R_FAILED(spl_rc))
+        return false;
+    const u32 ver = static_cast<u32>((raw_ver >> 40) & 0xFFFFFF);
     if (ver >= MAKEHOSVERSION(1, 8, 0)) {
         if (!npdm_patch_kc(npdm, static_cast<u32>(aciKacOffset), aci0.kac_size, 16, BIT(19)) ||
             !npdm_patch_kc(npdm, static_cast<u32>(acidKacOffset), acid.kac_size, 16, BIT(19)))
