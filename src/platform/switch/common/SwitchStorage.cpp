@@ -938,7 +938,7 @@ bool InitializeUsb(std::string* error)
 	// Register before starting the libusbhsfs manager. Registering afterwards
 	// misses the first populate event, so a drive already attached at boot is
 	// never published until it is unplugged and reconnected.
-	usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_None);
+	usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReplayJournal | UsbHsFsMountFlags_ShowHiddenFiles);
 	usbHsFsSetPopulateCallback(usbStatusChanged,nullptr);
 	const Result result=usbHsFsInitialize(0);
 	if (R_FAILED(result))

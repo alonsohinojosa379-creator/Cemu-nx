@@ -46,7 +46,8 @@ LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs $(ARCH) -Wl,-Map,$(notdir $*.ma
 			-Wl,--gc-sections -Wl,--build-id=none
 
 STORAGE_LIBS := $(TOPDIR)/../build_switch/_deps/libsmb2-build/lib/libsmb2.a \
-				$(TOPDIR)/../build_switch/_deps/libusbhsfs-build/liblibusbhsfs.a
+				$(TOPDIR)/../build_switch/_deps/libusbhsfs-build/liblibusbhsfs.a \
+				$(PORTLIBS)/lib/libntfs-3g.a
 ARCHIVE_LIBS := $(TOPDIR)/../build_switch/dependencies/ZArchive/libzarchive.a
 LIBS	:=	$(STORAGE_LIBS) $(ARCHIVE_LIBS) `$(PREFIX)pkg-config --libs $(PKGS)` -lturbojpeg -lzstd -lz -lGLESv2 -lnx
 
@@ -142,7 +143,9 @@ else
 $(OUTPUT).nro	:	$(OUTPUT).elf
 endif
 
-$(OUTPUT).elf	:	$(OFILES)
+# The launcher consumes CMake's storage archives directly. Relink when the
+# backend or its NTFS dependency changes, even if launcher sources do not.
+$(OUTPUT).elf	:	$(OFILES) $(STORAGE_LIBS)
 
 $(OFILES_SRC)	: $(HFILES_BIN)
 

@@ -29,11 +29,41 @@ The vendored LSFG-VK code is GPL-3.0-or-later; see
 
 ## Build
 
+Install the NTFS portlib along with your existing devkitPro dependencies:
+
+```sh
+dkp-pacman -S switch-ntfs-3g
+```
+
+Use `pacman` instead of `dkp-pacman` in devkitPro MSYS2. Both the core and
+launcher require this package; CMake reports a missing dependency at configure
+time. Then build both with:
+
 ```sh
 BUILD_JOBS=18 ./build_switch_all.sh
 ```
 
 The finished all-in-one launcher is `switch_launcher/cemu.nro`.
+
+## USB HDD storage
+
+FAT12/16/32, exFAT and NTFS drives are supported in both the SDL launcher and
+the emulator. Select the drive in the existing USB file browser and add your
+game folder as usual. The drive label includes its filesystem type. NTFS uses
+the pinned libusbhsfs backend and the devkitPro NTFS-3G portlib, following
+[Sphaira PR #361](https://github.com/NaGaa95/sphaira/pull/361). The existing
+UASP transport and BOT fallback also apply to NTFS.
+
+NTFS volumes mount with journal recovery and hidden-file browsing enabled.
+Access-time updates are disabled to avoid metadata writes during game reads.
+System files stay hidden and file read-only attributes are respected. Volumes
+left hibernated by Windows are not forced to mount: fully shut down Windows
+and safely eject the drive before connecting it. Use the launcher's **Safely
+eject USB drive** action before unplugging it from the Switch.
+
+NTFS support links the GPL-2.0-or-later NTFS-3G library; see the upstream
+[libusbhsfs licensing notes](https://github.com/ITotalJustice/libusbhsfs#licensing).
+EXT2/3/4 support remains disabled.
 
 ## Launcher updates
 
