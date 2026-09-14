@@ -13,6 +13,9 @@
 #include "Cafe/HW/Latte/Renderer/OpenGL/CachedFBOGL.h"
 #include "Cafe/HW/Latte/Renderer/OpenGL/RendererShaderGL.h"
 
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchGpuCapture.h"
+#endif
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
 #include "Cafe/OS/libs/gx2/GX2.h"
 
@@ -1151,6 +1154,9 @@ void OpenGLRenderer::draw_beginSequence()
 
 void OpenGLRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, const LatteDrawcallContext& drawcallContext)
 {
+#if defined(__SWITCH__)
+	SwitchGpuCapture_NoteDraw(count, instanceCount, baseVertex, indexDataMPTR != MPTR_NULL);
+#endif
 	bool isMinimal = !drawcallContext.isFirst;
     if (isMinimal)
         draw_genericDrawHandler<true, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);

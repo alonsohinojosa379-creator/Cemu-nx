@@ -93,6 +93,7 @@ if(PLATFORM_SWITCH)
 		platform/switch/SwitchInput.cpp
 		platform/switch/SwitchAmiibo.cpp
 		platform/switch/SwitchOverlay.cpp
+		platform/switch/SwitchGpuCapture.cpp
 		platform/switch/SwitchLSFG.cpp
 		platform/switch/SwitchToys.cpp
 		platform/switch/SwitchSwkbd.cpp

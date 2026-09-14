@@ -9,6 +9,9 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteIndices.h"
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchGpuCapture.h"
+#endif
 #include "Cafe/OS/libs/gx2/GX2.h"
 #include "imgui/imgui_impl_vulkan.h"
 #include "Cafe/GameProfile/GameProfile.h"
@@ -1351,6 +1354,9 @@ void VulkanRenderer::draw_beginSequence()
 
 void VulkanRenderer::draw_execute_first(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, const LatteDrawcallContext& drawcallContext)
 {
+#if defined(__SWITCH__)
+	SwitchGpuCapture_NoteDraw(count, instanceCount, baseVertex, indexDataMPTR != MPTR_NULL);
+#endif
 	if (m_state.drawSequenceSkip)
 	{
 		return;
@@ -1519,6 +1525,9 @@ void VulkanRenderer::draw_execute_first(uint32 baseVertex, uint32 baseInstance, 
 
 void VulkanRenderer::draw_execute_continued(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, const LatteDrawcallContext& drawcallContext)
 {
+#if defined(__SWITCH__)
+	SwitchGpuCapture_NoteDraw(count, instanceCount, baseVertex, indexDataMPTR != MPTR_NULL);
+#endif
 	if (m_state.drawSequenceSkip)
 	{
 		return;

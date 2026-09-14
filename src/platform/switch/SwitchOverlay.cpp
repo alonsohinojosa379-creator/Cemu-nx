@@ -1,4 +1,5 @@
 #include "platform/switch/SwitchOverlay.h"
+#include "platform/switch/SwitchGpuCapture.h"
 
 #include <switch.h>
 
@@ -43,6 +44,7 @@ enum class HotkeyAction : size_t
 	ToggleShaderNotice,
 	CycleController,
 	ScanAmiibo,
+	CaptureFrame,
 	ExitLauncher,
 	Count,
 };
@@ -73,6 +75,7 @@ constexpr std::array<HotkeyInfo, kHotkeyCount> kHotkeys{{
 	{"Toggle shader notice", "shader_notice", 0},
 	{"Cycle controller type", "controller", 0},
 	{"Scan Amiibo", "amiibo", 0},
+	{"Capture a frame", "gpu_capture", HidNpadButton_L | HidNpadButton_R | HidNpadButton_Minus},
 	{"Exit to launcher", "exit", HidNpadButton_L | HidNpadButton_R | HidNpadButton_ZL | HidNpadButton_ZR},
 }};
 
@@ -325,6 +328,9 @@ void DispatchHotkey(HotkeyAction action)
 		break;
 	case HotkeyAction::ScanAmiibo:
 		s_amiiboScanRequests.fetch_add(1, std::memory_order_release);
+		break;
+	case HotkeyAction::CaptureFrame:
+		SwitchGpuCapture_Request();
 		break;
 	case HotkeyAction::ExitLauncher:
 		s_exitRequests.fetch_add(1, std::memory_order_release);

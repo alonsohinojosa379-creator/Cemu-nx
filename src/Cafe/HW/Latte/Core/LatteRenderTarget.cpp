@@ -5,6 +5,9 @@
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteOverlay.h"
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchGpuCapture.h"
+#endif
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
 #include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
@@ -701,6 +704,10 @@ void LatteRenderTarget_itHLESwapScanBuffer()
 #endif
 	LatteQuery_CancelActiveGPU7Queries();
 	LatteBufferCache_notifySwapTVScanBuffer();
+#if defined(__SWITCH__)
+	SwitchGpuCapture_EndFrame();
+	SwitchGpuCapture_BeginFrame();
+#endif
 	LattePerformanceMonitor_frameBegin();
 }
 
