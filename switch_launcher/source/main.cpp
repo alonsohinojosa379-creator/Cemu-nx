@@ -2844,92 +2844,24 @@ static void migrateGameIdentity(Game &game) {
   migrateIdentityFile(GAMECFG_DIR,game.legacyKey,game.key,".ini");
 }
 
-static const char *gameStoreGet(Store &store, const Game &game, const char *def) {
-  return storeGet(store, game.key.c_str(), def);
-}
 
 static bool gameFileExists(const char *dir, const Game &game, const char *extension) {
   return regularFileExists(std::string(dir) + "/" + game.key + extension);
 }
 
-[[maybe_unused]] static void scanGames(const std::vector<std::string> &sourcePaths) {
-  for (auto &g : g_games) if (g.cover) SDL_DestroyTexture(g.cover);
-  g_games.clear();
-  g_coverUseSerial = 0;
-  auto titleCache = cemu_loadTitleCache(std::string(DATA_DIR) + "/title_list_cache.xml");
-  Store refreshedContainerTitles;
-  std::unordered_set<std::string> seenPaths;
-  for(const auto &source:sourcePaths){
-    DIR *d=opendir(source.c_str());
-    if(!d) continue;
-    struct dirent *e;
-    while((e=readdir(d))){
-      if(e->d_name[0]=='.') continue;
-      std::string full=join(source,e->d_name);
-      struct stat sst{};
-      bool isDir=stat(full.c_str(),&sst)==0&&S_ISDIR(sst.st_mode);
-      bool isGameDir=isDir&&stat((full+"/code").c_str(),&sst)==0;
-      if(!isGameDir&&(isDir||!hasGameExt(e->d_name))) continue;
-      if(!seenPaths.insert(pathIdentity(full)).second) continue;
-      Game g;
-      g.file=e->d_name;
-      g.path=full;
-      g.legacyKey=makeGameKey(e->d_name,full);
-      g.key=g.legacyKey;
-      bool haveStat=stat(full.c_str(),&sst)==0;
-      if(haveStat){ g.added=(long long)sst.st_mtime; g.modified=g.added; g.fileSize=(long long)sst.st_size; }
-      if(!isDir&&haveStat){
-        const char *cached=storeGet(g_containerTitles,g.legacyKey.c_str(),"");
-        long long cachedSize=0,cachedTime=0; unsigned long long cachedId=0,cachedFingerprint=0; int consumed=0;
-        const int parsed=sscanf(cached,"%lld,%lld,%llx,%llx%n",&cachedSize,&cachedTime,&cachedId,&cachedFingerprint,&consumed);
-        if(parsed>=3&&cached[consumed]==0&&cachedSize==(long long)sst.st_size&&cachedTime==(long long)sst.st_mtime&&(cachedId>>48)==0x0005){
-          g.titleId=(uint64_t)cachedId;
-          if(parsed==4) g.fingerprint=(uint64_t)cachedFingerprint;
-        }
-      }
-      if(!g.titleId) g.titleId=cemu_resolveBaseTitleId(full,titleCache,&g.titleIdError);
-      if(!isDir&&!g.fingerprint) g.fingerprint=fingerprintGameFile(full,sst);
-      g.key=stableGameKey(g.titleId,full,sst,isDir,g.fingerprint);
-      migrateGameIdentity(g);
-      if(!isDir&&haveStat&&g.titleId){
-        char cached[128]; snprintf(cached,sizeof(cached),"%lld,%lld,%016llx,%016llx",(long long)sst.st_size,(long long)sst.st_mtime,(unsigned long long)g.titleId,(unsigned long long)g.fingerprint);
-        storeSet(refreshedContainerTitles,g.key.c_str(),cached);
-        storeSet(refreshedContainerTitles,g.legacyKey.c_str(),cached);
-      }
-      g_games.push_back(std::move(g));
-    }
-    closedir(d);
-  }
+static std::string fileNameOf(const std::string &path);
 
-  for (auto &game : g_games) {
-    const char *customTitle = gameStoreGet(g_titles, game, "");
-    game.title = *customTitle ? customTitle : cleanTitle(game.file);
-    game.region = detectRegion(game.file);
-    game.played = atoll(gameStoreGet(g_recent, game, "0"));
-    game.hasCfg = gameFileExists(GAMECFG_DIR, game, ".ini");
-  }
+static bool nameIsBareTitleId(const std::string &name) {
+  if(name.size()!=16) return false;
+  for(unsigned char c:name) if(!isxdigit(c)) return false;
+  return true;
+}
 
-  for (auto &t : cemu_scanMlcTitles(std::string(DATA_DIR) + "/mlc01")) {
-    Game g;
-    g.titleId = t.titleId;
-    g.iconPath = t.iconPath;
-    char idkey[40]; snprintf(idkey, sizeof(idkey), "wiiu-installed-%016llx", (unsigned long long)t.titleId);
-    g.key = idkey;
-    g.file = idkey;
-    const char *ct = storeGet(g_titles, g.key.c_str(), "");
-    g.title = ct[0] ? std::string(ct) : (t.name.empty() ? std::string(idkey) : t.name);
-    g.region = 0;
-    g.played = atoll(storeGet(g_recent, g.key.c_str(), "0"));
-    struct stat st;
-    g.hasCfg = stat((std::string(GAMEPROFILES_DIR) + "/" + g.key + ".ini").c_str(), &st) == 0;
-    g_games.push_back(std::move(g));
-  }
-  bool cacheChanged=g_containerTitles.kv.size()!=refreshedContainerTitles.kv.size();
-  if(!cacheChanged) for(const auto &entry:refreshedContainerTitles.kv)
-    if(strcmp(storeGet(g_containerTitles,entry.k.c_str(),""),entry.v.c_str())!=0){ cacheChanged=true; break; }
-  g_containerTitles=std::move(refreshedContainerTitles);
-  if(cacheChanged) storeSave(g_containerTitles,CONTAINER_TITLES_INI);
-  applySort();
+static bool directoryIsTitle(const std::string &path) {
+  struct stat info{};
+  if(stat((path+"/code").c_str(),&info)==0) return true;
+  const uint64_t nusTitleId=cemu_readNusTitleId(path);
+  return nusTitleId!=0&&(uint32_t)(nusTitleId>>32)==0x00050000;
 }
 
 struct LibraryScanState {
@@ -2990,14 +2922,18 @@ static void libraryScanWorker(const std::shared_ptr<LibraryScanState> &state,
     while(!state->cancel.load()&&(entry=readdir(directory))) if(entry->d_name[0]!='.') names.emplace_back(entry->d_name);
     closedir(directory);
     state->completedSources.push_back(normalizeLocationPath(source));
-    for(const std::string &name:names){
+    // display name, path
+    std::vector<std::pair<std::string,std::string>> candidates;
+    if(directoryIsTitle(source)) candidates.emplace_back(fileNameOf(source),source);
+    for(const std::string &name:names) candidates.emplace_back(name,join(source,name));
+    for(const auto &candidate:candidates){
       if(state->cancel.load()) break;
-      const std::string full=join(source,name);
+      const std::string &name=candidate.first;
+      const std::string &full=candidate.second;
       struct stat info{};
       const bool exists=SwitchStorage::GetCachedSmbStat(full,&info)||stat(full.c_str(),&info)==0;
       const bool isDirectory=exists&&S_ISDIR(info.st_mode);
-      struct stat codeInfo{};
-      const bool isGameDirectory=isDirectory&&stat((full+"/code").c_str(),&codeInfo)==0;
+      const bool isGameDirectory=isDirectory&&directoryIsTitle(full);
       if(!isGameDirectory&&(isDirectory||!hasGameExt(name.c_str()))) continue;
       if(!seenPaths.insert(pathIdentity(full)).second) continue;
       Game game;
@@ -3025,6 +2961,10 @@ static void libraryScanWorker(const std::shared_ptr<LibraryScanState> &state,
       const char *custom=storeGet(titles,game.key.c_str(),"");
       if(!custom[0]) custom=storeGet(titles,game.legacyKey.c_str(),"");
       game.title=custom[0]?custom:cleanTitle(game.file);
+      if(!custom[0]&&nameIsBareTitleId(game.file)){
+        std::string cached=cemu_titleNameFromCache(titleCache,game.titleId);
+        if(!cached.empty()) game.title=std::move(cached);
+      }
       game.region=detectRegion(game.file);
       const char *played=storeGet(recent,game.key.c_str(),"");
       if(!played[0]) played=storeGet(recent,game.legacyKey.c_str(),"0");
@@ -3445,11 +3385,9 @@ static bool promptTextModeStatic(const char (&header)[N],const char *initial,cha
                         password,allowEmpty,subText,guideText);
 }
 
-static bool isTitleFile(const char *name);
 static bool folderIsExtractedTitle(const std::string &dir);
-enum class InstallKind { None, ExtractedTitle, GameImage };
-static InstallKind installKindOf(const std::string &path, bool directory);
-static void installFromPath(const std::string &picked, bool directory);
+static bool pathIsInstallable(const std::string &path, bool directory);
+static void installFromPath(const std::string &picked);
 
 struct FileClipboard {
   std::string path;
@@ -4197,9 +4135,8 @@ static bool browserActionsAvailable(const BrowserItem &item,BrowserMode mode) {
 static bool browserActions(const BrowserItem &item,BrowserMode mode) {
   if(!browserActionsAvailable(item,mode)) return false;
   std::vector<std::string> labels;
-  const InstallKind installable=mode==BrowserMode::Manage?
-    installKindOf(item.path,item.directory):InstallKind::None;
-  if(installable!=InstallKind::None) labels.push_back("Install");
+  const bool installable=mode==BrowserMode::Manage&&pathIsInstallable(item.path,item.directory);
+  if(installable) labels.push_back("Install");
   if(mode==BrowserMode::Manage){ labels.insert(labels.end(),{"Copy","Move","Rename"}); }
   bool canPin=item.directory;
   bool pinned=false;
@@ -4212,11 +4149,11 @@ static bool browserActions(const BrowserItem &item,BrowserMode mode) {
   std::vector<const char*> choices; for(const auto &label:labels) choices.push_back(label.c_str());
   int action=dropdownStaticTitle("File options",choices.data(),(int)choices.size(),0);
   if(action<0) return false;
-  if(installable!=InstallKind::None&&action==0){
-    installFromPath(item.path,item.directory);
+  if(installable&&action==0){
+    installFromPath(item.path);
     return true;
   }
-  const int manageBase=installable!=InstallKind::None?1:0;
+  const int manageBase=installable?1:0;
   if(mode==BrowserMode::Manage&&action==manageBase){ g_fileClipboard={item.path,false}; toastStatic("Copied to clipboard"); return false; }
   if(mode==BrowserMode::Manage&&action==manageBase+1){ g_fileClipboard={item.path,true}; toastStatic("Move queued"); return false; }
   if(mode==BrowserMode::Manage&&action==manageBase+2){
@@ -4350,10 +4287,6 @@ static void runFileManager() {
   runFileBrowser({},BrowserMode::Manage);
 }
 
-static bool isTitleFile(const char *name) {
-  const char *dot = strrchr(name, '.'); if (!dot) return false;
-  return !strcasecmp(dot, ".wua") || !strcasecmp(dot, ".wud") || !strcasecmp(dot, ".wux") || !strcasecmp(dot, ".wuhb");
-}
 static bool folderIsExtractedTitle(const std::string &dir) {
   struct stat st;
   if (stat((dir + "/code/app.xml").c_str(), &st) == 0) return true;
@@ -4362,35 +4295,6 @@ static bool folderIsExtractedTitle(const std::string &dir) {
   bool m = stat((dir+"/meta").c_str(),&st)==0 && S_ISDIR(st.st_mode);
   return c && o && m;
 }
-static bool copyFileProgress(const std::string &src, const std::string &dst, long long size, void(*prog)(int)) {
-  FILE *in = fopen(src.c_str(), "rb"); if (!in) return false;
-  if (!recoverAtomicFile(dst)) { fclose(in); return false; }
-  const std::string tmp = dst + ".tmp";
-  FILE *out = fopen(tmp.c_str(), "wb"); if (!out) { fclose(in); return false; }
-  static unsigned char buf[1 << 18]; size_t nr; bool ok = true; long long written = 0; int last = -1;
-  appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
-  while ((nr = fread(buf, 1, sizeof(buf), in)) > 0) {
-    if (fwrite(buf, 1, nr, out) != nr) { ok = false; break; }
-    written += (long long)nr;
-    int pct = size > 0 ? (int)(written * 100 / size) : 100;
-    if (pct > 100) pct = 100;
-    if (prog && pct != last) { prog(pct); last = pct; }
-  }
-  if (ferror(in)) ok = false;
-  if (written != size) ok = false;
-  if (ok && fflush(out) != 0) ok = false;
-  if (ok && fsync(fileno(out)) != 0) ok = false;
-  if (fclose(in) != 0) ok = false;
-  if (fclose(out) != 0) ok = false;
-  appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
-  struct stat copied{};
-  if (ok && (stat(tmp.c_str(), &copied) != 0 || !S_ISREG(copied.st_mode) || (long long)copied.st_size != size)) ok = false;
-  if (ok && !replaceAtomic(dst, tmp)) ok = false;
-  if (!ok) remove(tmp.c_str());
-  if (ok && prog && last != 100) prog(100);
-  return ok;
-}
-
 static int choiceIdx(const Opt &o) {
   const char *cur = iniGet(o.key, o.def);
   for (int i=0;i<o.nch;i++) if (!strcmp(o.ch[i].val, cur)) return i;
@@ -5175,9 +5079,8 @@ static void installProgress(int pct) {
   drawTextC(g_font,SW/2,by+bh+22,t,COL_TXT);
   SDL_RenderPresent(g_ren);
 }
-static InstallKind installKindOf(const std::string &path, bool directory) {
-  if (directory) return folderIsExtractedTitle(path) ? InstallKind::ExtractedTitle : InstallKind::None;
-  return isTitleFile(fileNameOf(path).c_str()) ? InstallKind::GameImage : InstallKind::None;
+static bool pathIsInstallable(const std::string &path, bool directory) {
+  return directory && folderIsExtractedTitle(path);
 }
 
 static const char *titleIdKindName(uint64_t titleId) {
@@ -5185,46 +5088,19 @@ static const char *titleIdKindName(uint64_t titleId) {
   return high == 0x0005000E ? "update" : high == 0x0005000C ? "DLC" : "game";
 }
 
-static void installFromPath(const std::string &picked, bool directory) {
-  struct stat st;
-  if (stat(picked.c_str(), &st) != 0) { toastStatic("Not found"); return; }
-  if (directory) {
-    const uint64_t titleId = cemu_peekTitleId(picked);
-    if (!titleId) { modalMessageStatic("Not installable", {"No code/app.xml with a Wii U title id here."}); return; }
-    char detail[80];
-    snprintf(detail, sizeof(detail), "%016llx", (unsigned long long)titleId);
-    if (!confirmBoxStatic("Install this title?",
-                          {fileNameOf(picked), std::string("Type: ") + titleIdKindName(titleId),
-                           std::string("Title id: ") + detail, "", "It will be installed to mlc01."}))
-      return;
-    std::string msg;
-    int r = cemu_installTitle(picked, std::string(DATA_DIR)+"/mlc01", installProgress, msg);
-    toast(msg.c_str());
-    if (r == 0) { ensureDefaultGameSource(); g_rescanAfterSettings = true; }
-  } else {
-    std::string fname = picked.substr(picked.find_last_of('/') + 1);
-    if (!confirmBoxStatic("Copy this game to the library?",
-                          {fname, "", "It will be copied into the games folder."}))
-      return;
-    std::string gamesDir = std::string(DATA_DIR) + "/games";
-    std::string dst = gamesDir + "/" + fname;
-    if (picked == dst) { toastStatic("Already in the games folder"); return; }
-    if (mkdir(gamesDir.c_str(), 0777) != 0 && errno != EEXIST) { toastStatic("Could not create games folder"); return; }
-    struct stat dirStat{};
-    if (stat(gamesDir.c_str(), &dirStat) != 0 || !S_ISDIR(dirStat.st_mode)) { toastStatic("Games path is not a folder"); return; }
-    if (!recoverAtomicFile(dst)) { toastStatic("Could not recover previous install"); return; }
-    struct stat dstStat{};
-    if (stat(dst.c_str(), &dstStat) == 0) {
-      if (!S_ISREG(dstStat.st_mode)) { toastStatic("Destination is not a file"); return; }
-      if (!confirmBoxStatic("Replace existing file?", {fname, "", "The existing copy will be replaced."})) return;
-    } else if (errno != ENOENT) {
-      toastStatic("Could not check destination"); return;
-    }
-    bool ok = copyFileProgress(picked, dst, (long long)st.st_size, installProgress);
-    toast(LauncherLocalization::Translate(
-      ok ? "Installed to games folder" : "Copy failed (SD space?)").data());
-    if (ok) { ensureDefaultGameSource(); g_rescanAfterSettings = true; }
-  }
+static void installFromPath(const std::string &picked) {
+  const uint64_t titleId = cemu_peekTitleId(picked);
+  if (!titleId) { modalMessageStatic("Not installable", {"No code/app.xml with a Wii U title id here."}); return; }
+  char detail[80];
+  snprintf(detail, sizeof(detail), "%016llx", (unsigned long long)titleId);
+  if (!confirmBoxStatic("Install this title?",
+                        {fileNameOf(picked), std::string("Type: ") + titleIdKindName(titleId),
+                         std::string("Title id: ") + detail, "", "It will be installed to mlc01."}))
+    return;
+  std::string msg;
+  int r = cemu_installTitle(picked, std::string(DATA_DIR)+"/mlc01", installProgress, msg);
+  toast(msg.c_str());
+  if (r == 0) { ensureDefaultGameSource(); g_rescanAfterSettings = true; }
 }
 
 static void ensureDefaultGameSource() {
@@ -8159,8 +8035,7 @@ int main(int argc, char **argv){
       const bool exists=SwitchStorage::GetCachedSmbStat(directPath,&info)||stat(directPath.c_str(),&info)==0;
       if(!exists) return false;
       const bool isDirectory=S_ISDIR(info.st_mode);
-      struct stat codeInfo{};
-      const bool isGameDirectory=isDirectory&&stat((directPath+"/code").c_str(),&codeInfo)==0;
+      const bool isGameDirectory=isDirectory&&directoryIsTitle(directPath);
       const size_t slash=directPath.find_last_of("/\\");
       const std::string file=slash==std::string::npos?directPath:directPath.substr(slash+1);
       if(!isGameDirectory&&(isDirectory||!hasGameExt(file.c_str()))) return false;
@@ -8210,6 +8085,10 @@ int main(int argc, char **argv){
       const char *custom=storeGet(g_titles,game.key.c_str(),"");
       if(!custom[0]) custom=storeGet(g_titles,game.legacyKey.c_str(),"");
       game.title=custom[0]?custom:cleanTitle(game.file);
+      if(!custom[0]&&nameIsBareTitleId(game.file)){
+        std::string cached=cemu_titleNameFromCache(titleCache,game.titleId);
+        if(!cached.empty()) game.title=std::move(cached);
+      }
       game.region=detectRegion(game.file);
       const char *played=storeGet(g_recent,game.key.c_str(),"");
       if(!played[0]) played=storeGet(g_recent,game.legacyKey.c_str(),"0");

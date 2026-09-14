@@ -291,9 +291,36 @@ std::vector<TitleCacheEntry> cemu_loadTitleCache(const std::string &cacheXmlPath
     std::string path = cemu_normalizeTitlePath(pathEl->GetText());
     if (!parseHex(idAttr, 16, titleId) || path == "/" || (titleId >> 48) != 0x0005)
       continue;
-    out.push_back({std::move(path), titleId});
+    auto *nameEl = t->FirstChildElement("name");
+    const char *name = nameEl ? nameEl->GetText() : nullptr;
+    out.push_back({std::move(path), titleId, name ? std::string(name) : std::string()});
   }
   return out;
+}
+
+std::string cemu_titleNameFromCache(const std::vector<TitleCacheEntry> &cache, uint64_t titleId) {
+  if (!titleId)
+    return {};
+  const uint64_t wanted = baseTitleId(titleId);
+  for (const auto &entry : cache)
+    if (!entry.name.empty() && baseTitleId(entry.titleId) == wanted)
+      return entry.name;
+  return {};
+}
+
+uint64_t cemu_readNusTitleId(const std::string &folder) {
+  FILE *file = fopen((folder + "/title.tmd").c_str(), "rb");
+  if (!file)
+    return 0;
+  unsigned char header[0x194];
+  const size_t read = fread(header, 1, sizeof(header), file);
+  fclose(file);
+  if (read < sizeof(header))
+    return 0;
+  uint64_t titleId = 0;
+  for (int i = 0; i < 8; i++)
+    titleId = (titleId << 8) | header[0x18C + i];
+  return (titleId >> 48) == 0x0005 ? titleId : 0;
 }
 
 uint64_t cemu_resolveBaseTitleId(const std::string &gamePath,
@@ -302,6 +329,8 @@ uint64_t cemu_resolveBaseTitleId(const std::string &gamePath,
   if (error) error->clear();
   if (uint64_t titleId = readExtractedTitleId(gamePath))
     return titleId;
+  if (uint64_t titleId = cemu_readNusTitleId(gamePath))
+    return baseTitleId(titleId);
 
   std::string containerError;
   if (uint64_t titleId = cemu_readContainerBaseTitleId(

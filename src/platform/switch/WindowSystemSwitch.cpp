@@ -4,6 +4,7 @@
 
 #include "util/crypto/aes128.h"
 #include "config/ActiveSettings.h"
+#include "Cemu/Logging/CemuLogging.h"
 #include "config/CemuConfig.h"
 #include "config/LaunchSettings.h"
 #include "config/NetworkSettings.h"
@@ -625,8 +626,18 @@ namespace WindowSystem
 		return CafeTitleList::FindBaseTitleId(titleId, baseTitleId);
 	}
 
-	static bool ResolveTitlePath(const fs::path& path, TitleId& baseTitleId)
+	static fs::path ResolveNusFolder(const fs::path& path)
 	{
+		std::error_code ec;
+		if (!fs::is_directory(path, ec))
+			return path;
+		const fs::path tmd = path / "title.tmd";
+		return fs::is_regular_file(tmd, ec) ? tmd : path;
+	}
+
+	static bool ResolveTitlePath(const fs::path& rawPath, TitleId& baseTitleId)
+	{
+		const fs::path path = ResolveNusFolder(rawPath);
 		TitleInfo title{path};
 		if (!title.IsValid())
 			return false;
