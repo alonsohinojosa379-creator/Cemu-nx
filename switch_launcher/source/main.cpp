@@ -7272,6 +7272,36 @@ static void chooseLibraryFilter() {
   rebuildLibraryView(); beginScreenFx();
 }
 
+static bool gameFolderDeletable(const std::string &path,std::string &reason){
+  if(filesystemRoot(path)){ reason="That path is a drive root."; return false; }
+  if(!directoryIsTitle(path)){
+    reason="No code folder or title.tmd here, so this is not a game folder.";
+    return false;
+  }
+  const std::string normalized=normalizeLocationPath(path);
+  for(const std::string &source:loadGameSources())
+    if(normalizeLocationPath(source)==normalized){
+      reason="This is a configured game folder. Remove it from Game folders first.";
+      return false;
+    }
+  return true;
+}
+
+static void measureTree(const std::string &path,size_t &files,uint64_t &bytes){
+  DIR *dir=opendir(path.c_str());
+  if(!dir) return;
+  struct dirent *entry;
+  while((entry=readdir(dir))){
+    if(!strcmp(entry->d_name,".")||!strcmp(entry->d_name,"..")) continue;
+    const std::string child=join(path,entry->d_name);
+    struct stat info{};
+    if(lstat(child.c_str(),&info)!=0) continue;
+    if(S_ISDIR(info.st_mode)) measureTree(child,files,bytes);
+    else { files++; bytes+=(uint64_t)info.st_size; }
+  }
+  closedir(dir);
+}
+
 static const char *GAME_MENU_ITEMS[]={"Launch","Game settings","Graphics packs","Rename game",
   "Cover settings","Create HOME shortcut","Manage installed content","Clear shader caches",
   "Clear game settings","Favorite / collections","Delete game (remove from SD)"};
@@ -7406,33 +7436,42 @@ static int perGameMenu(Game &g) {
             }
             else {
               struct stat gameStat{};
+              std::string reason;
               if (stat(g.path.c_str(), &gameStat) != 0) {
                 modalMessageStatic("Delete failed", { "The selected game no longer exists.", "No metadata was removed." });
                 beginScreenFx();
-              } else if (S_ISDIR(gameStat.st_mode)) {
-                modalMessageStatic("Folder deletion disabled", {
-                  "Extracted game folders are not deleted automatically.",
-                  "Remove this folder manually to avoid deleting unrelated files:",
-                  g.path
-                });
+              } else if (!S_ISDIR(gameStat.st_mode) && !S_ISREG(gameStat.st_mode)) {
+                modalMessageStatic("Delete failed", { "The selected path is not a game file or folder." });
                 beginScreenFx();
-              } else if (!S_ISREG(gameStat.st_mode)) {
-                modalMessageStatic("Delete failed", { "The selected path is not a regular game file." });
+              } else if (S_ISDIR(gameStat.st_mode) && !gameFolderDeletable(g.path, reason)) {
+                modalMessageStatic("Delete failed", { reason, g.path });
                 beginScreenFx();
-              } else if(confirmBoxStatic("Delete game?", { g.title, "", "This permanently deletes the game file from",
-                                                  "the SD card. This cannot be undone." })){
-                if (remove(g.path.c_str()) != 0) {
-                  modalMessageStatic("Delete failed", { "The game file could not be removed.", "No metadata was removed." });
-                  beginScreenFx();
-                } else {
-                  remove(coverPath(g).c_str());
-                  remove(gp.c_str());
-                  storeRemove(g_titles, g.key.c_str());
-                  storeRemove(g_recent, g.key.c_str());
-                  storeSave(g_titles, TITLES_INI);
-                  storeSave(g_recent, RECENT_INI);
-                  toastStatic("Game deleted");
-                  return 2;
+              } else {
+                const bool folder = S_ISDIR(gameStat.st_mode);
+                size_t files = 1;
+                uint64_t bytes = (uint64_t)gameStat.st_size;
+                if (folder) { files = 0; bytes = 0; measureTree(g.path, files, bytes); }
+                char counted[96];
+                snprintf(counted, sizeof(counted), "%llu file(s), %s",
+                         (unsigned long long)files, installedSizeText(bytes).c_str());
+                if (confirmBoxStatic("Delete game?", { g.title, g.path, std::string(counted), "",
+                                                       "This permanently deletes it from its location.",
+                                                       "This cannot be undone." })) {
+                  const bool removed = folder ? removeTreeInternal(g.path) : remove(g.path.c_str()) == 0;
+                  if (!removed) {
+                    modalMessageStatic("Delete failed", { "The game could not be removed.", "No metadata was removed." });
+                    beginScreenFx();
+                  } else {
+                    fsdevCommitDevice("sdmc");
+                    remove(coverPath(g).c_str());
+                    remove(gp.c_str());
+                    storeRemove(g_titles, g.key.c_str());
+                    storeRemove(g_recent, g.key.c_str());
+                    storeSave(g_titles, TITLES_INI);
+                    storeSave(g_recent, RECENT_INI);
+                    toastStatic("Game deleted");
+                    return 2;
+                  }
                 }
               }
             }
