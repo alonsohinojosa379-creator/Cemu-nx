@@ -221,33 +221,37 @@ namespace coreinit
 
 	sint32 OSDynLoad_GetNumberOfRPLs()
 	{
-		return RPLLoader_GetModuleCount();
+		return (sint32)RPLLoader_GetModuleList().size();
 	}
 
 	uint32 OSDynLoad_GetRPLInfo(uint32 first, uint32 count, OSDynLoad_NotifyData* outInfos)
 	{
 		if (count == 0)
 			return 1;
-
-		const sint32 moduleCount = RPLLoader_GetModuleCount();
-		if (!outInfos || moduleCount < 0 || first >= static_cast<uint32>(moduleCount) ||
-			count > static_cast<uint32>(moduleCount) - first)
+		if (!outInfos)
 			return 0;
-
-		RPLModule** modules = RPLLoader_GetModuleList();
-		for (uint32 outputIndex = 0; outputIndex < count; ++outputIndex)
+		auto modules = RPLLoader_GetModuleList();
+		for (uint32 i = first; i < first + count; i++)
 		{
-			const RPLModule* module = modules[first + outputIndex];
-			outInfos[outputIndex].name = module->ppcName.GetMPTR();
-			outInfos[outputIndex].textAddr = module->regionMappingBase_text.GetBEValue();
-			outInfos[outputIndex].textOffset = module->regionMappingBase_text.GetMPTR() - module->regionOrigAddr_text;
-			outInfos[outputIndex].textSize = module->regionSize_text;
-			outInfos[outputIndex].dataAddr = module->regionMappingBase_data;
-			outInfos[outputIndex].dataOffset = module->regionMappingBase_data - module->regionOrigAddr_data;
-			outInfos[outputIndex].dataSize = module->regionSize_data;
-			outInfos[outputIndex].readAddr = module->regionMappingBase_data;
-			outInfos[outputIndex].readOffset = module->regionMappingBase_data - module->regionOrigAddr_data;
-			outInfos[outputIndex].readSize = module->regionSize_data;
+			auto& outEntry = outInfos[i - first];
+			if (i >= modules.size())
+			{
+				memset(&outEntry, 0, sizeof(OSDynLoad_NotifyData));
+				continue;
+			}
+			outEntry.name = modules[i]->ppcName.GetMPTR();
+
+			outEntry.textAddr = modules[i]->regionMappingBase_text.GetBEValue();
+			outEntry.textOffset = modules[i]->regionMappingBase_text.GetMPTR() - modules[i]->regionOrigAddr_text;
+			outEntry.textSize = modules[i]->regionSize_text;
+
+			outEntry.dataAddr = modules[i]->regionMappingBase_data;
+			outEntry.dataOffset = modules[i]->regionMappingBase_data - modules[i]->regionOrigAddr_data;
+			outEntry.dataSize = modules[i]->regionSize_data;
+
+			outEntry.readAddr = modules[i]->regionMappingBase_data;
+			outEntry.readOffset = modules[i]->regionMappingBase_data - modules[i]->regionOrigAddr_data;
+			outEntry.readSize = modules[i]->regionSize_data;
 		}
 		return 1;
 	}
