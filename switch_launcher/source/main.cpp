@@ -3447,6 +3447,9 @@ static bool promptTextModeStatic(const char (&header)[N],const char *initial,cha
 
 static bool isTitleFile(const char *name);
 static bool folderIsExtractedTitle(const std::string &dir);
+enum class InstallKind { None, ExtractedTitle, GameImage };
+static InstallKind installKindOf(const std::string &path, bool directory);
+static void installFromPath(const std::string &picked, bool directory);
 
 struct FileClipboard {
   std::string path;
@@ -4040,7 +4043,7 @@ static void networkSharesScreen() {
   }
 }
 
-enum class BrowserMode { SelectFolder, SelectTitle, SelectImage, Manage };
+enum class BrowserMode { SelectFolder, SelectImage, Manage };
 enum class BrowserItemKind { Use, Up, Paste, Favorite, Directory, File, Location, Smb, ManageSmb };
 struct BrowserItem {
   std::string label,path;
@@ -4141,7 +4144,6 @@ static std::vector<BrowserItem> browserItems(const std::string &current,BrowserM
     return items;
   }
   if(mode==BrowserMode::SelectFolder) items.push_back({"[ Use this folder ]",current,BrowserItemKind::Use,true});
-  if(mode==BrowserMode::SelectTitle&&folderIsExtractedTitle(current)) items.push_back({"[ Install extracted title here ]",current,BrowserItemKind::Use,true});
   if(mode==BrowserMode::Manage&&!g_fileClipboard.path.empty()) items.push_back({std::string("[ Paste ")+(g_fileClipboard.move?"moved":"copied")+" item here ]",current,BrowserItemKind::Paste,true});
   if(mode==BrowserMode::Manage){
     auto favorites=loadFavoriteFolders();
@@ -4157,7 +4159,6 @@ static std::vector<BrowserItem> browserItems(const std::string &current,BrowserM
     std::string path=join(current,entry->d_name); bool directory=entry->d_type==DT_DIR;
     if(entry->d_type==DT_UNKNOWN){ struct stat st{}; if(stat(path.c_str(),&st)!=0) continue; directory=S_ISDIR(st.st_mode); }
     if(!directory&&mode==BrowserMode::SelectFolder) continue;
-    if(!directory&&mode==BrowserMode::SelectTitle&&!isTitleFile(entry->d_name)) continue;
     if(!directory&&mode==BrowserMode::SelectImage){
       const size_t dot=path.find_last_of('.');std::string extension=dot==std::string::npos?std::string{}:path.substr(dot);
       std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char value){return (char)std::tolower(value);});
@@ -4196,7 +4197,10 @@ static bool browserActionsAvailable(const BrowserItem &item,BrowserMode mode) {
 static bool browserActions(const BrowserItem &item,BrowserMode mode) {
   if(!browserActionsAvailable(item,mode)) return false;
   std::vector<std::string> labels;
-  if(mode==BrowserMode::Manage){ labels={"Copy","Move","Rename"}; }
+  const InstallKind installable=mode==BrowserMode::Manage?
+    installKindOf(item.path,item.directory):InstallKind::None;
+  if(installable!=InstallKind::None) labels.push_back("Install");
+  if(mode==BrowserMode::Manage){ labels.insert(labels.end(),{"Copy","Move","Rename"}); }
   bool canPin=item.directory;
   bool pinned=false;
   if(canPin){
@@ -4208,9 +4212,14 @@ static bool browserActions(const BrowserItem &item,BrowserMode mode) {
   std::vector<const char*> choices; for(const auto &label:labels) choices.push_back(label.c_str());
   int action=dropdownStaticTitle("File options",choices.data(),(int)choices.size(),0);
   if(action<0) return false;
-  if(mode==BrowserMode::Manage&&action==0){ g_fileClipboard={item.path,false}; toastStatic("Copied to clipboard"); return false; }
-  if(mode==BrowserMode::Manage&&action==1){ g_fileClipboard={item.path,true}; toastStatic("Move queued"); return false; }
-  if(mode==BrowserMode::Manage&&action==2){
+  if(installable!=InstallKind::None&&action==0){
+    installFromPath(item.path,item.directory);
+    return true;
+  }
+  const int manageBase=installable!=InstallKind::None?1:0;
+  if(mode==BrowserMode::Manage&&action==manageBase){ g_fileClipboard={item.path,false}; toastStatic("Copied to clipboard"); return false; }
+  if(mode==BrowserMode::Manage&&action==manageBase+1){ g_fileClipboard={item.path,true}; toastStatic("Move queued"); return false; }
+  if(mode==BrowserMode::Manage&&action==manageBase+2){
     char name[256]; std::string oldName=fileNameOf(item.path);
     if(!promptTextStatic("Rename",oldName.c_str(),name,sizeof(name))) return false;
     std::string newName=trim(name);
@@ -4286,7 +4295,6 @@ static std::string runFileBrowser(const std::string &start,BrowserMode mode) {
           else if(item.kind==BrowserItemKind::Up){ current=item.path; sel=top=0; rebuild=true; }
           else if(item.kind==BrowserItemKind::ManageSmb){ networkSharesScreen(); sel=top=0; rebuild=true; }
           else if(item.kind==BrowserItemKind::Directory){ current=item.path; sel=top=0; rebuild=true; }
-          else if(item.kind==BrowserItemKind::File&&mode==BrowserMode::SelectTitle) return item.path;
           else if(item.kind==BrowserItemKind::File&&mode==BrowserMode::SelectImage) return item.path;
           else if(item.kind==BrowserItemKind::Location||item.kind==BrowserItemKind::Smb){
             if(ensurePathMounted(item.path)){ DIR *test=opendir(item.path.c_str()); if(test){ closedir(test); current=item.path; sel=top=0; rebuild=true; } else modalMessageStatic("Location unavailable",{item.path}); }
@@ -4297,7 +4305,7 @@ static std::string runFileBrowser(const std::string &start,BrowserMode mode) {
       }
       if(rebuild) break;
       clearUiBackground();
-      const char *title=mode==BrowserMode::Manage?"File manager":mode==BrowserMode::SelectTitle?"Select title":
+      const char *title=mode==BrowserMode::Manage?"File manager":
                         mode==BrowserMode::SelectImage?"Select local cover":"Select game folder";
       drawHeader(LauncherLocalization::Translate(title).data(),
                  current.empty()?LauncherLocalization::Translate("Locations").data():current.c_str());
@@ -4381,9 +4389,6 @@ static bool copyFileProgress(const std::string &src, const std::string &dst, lon
   if (!ok) remove(tmp.c_str());
   if (ok && prog && last != 100) prog(100);
   return ok;
-}
-static std::string browseTitleFile(const std::string &start) {
-  return runFileBrowser(start,BrowserMode::SelectTitle);
 }
 
 static int choiceIdx(const Opt &o) {
@@ -5170,18 +5175,37 @@ static void installProgress(int pct) {
   drawTextC(g_font,SW/2,by+bh+22,t,COL_TXT);
   SDL_RenderPresent(g_ren);
 }
-static void doInstallFlow() {
-  std::string picked = browseTitleFile("sdmc:/");
-  if (picked.empty()) return;
+static InstallKind installKindOf(const std::string &path, bool directory) {
+  if (directory) return folderIsExtractedTitle(path) ? InstallKind::ExtractedTitle : InstallKind::None;
+  return isTitleFile(fileNameOf(path).c_str()) ? InstallKind::GameImage : InstallKind::None;
+}
+
+static const char *titleIdKindName(uint64_t titleId) {
+  const uint32_t high = (uint32_t)(titleId >> 32);
+  return high == 0x0005000E ? "update" : high == 0x0005000C ? "DLC" : "game";
+}
+
+static void installFromPath(const std::string &picked, bool directory) {
   struct stat st;
   if (stat(picked.c_str(), &st) != 0) { toastStatic("Not found"); return; }
-  if (S_ISDIR(st.st_mode)) {
+  if (directory) {
+    const uint64_t titleId = cemu_peekTitleId(picked);
+    if (!titleId) { modalMessageStatic("Not installable", {"No code/app.xml with a Wii U title id here."}); return; }
+    char detail[80];
+    snprintf(detail, sizeof(detail), "%016llx", (unsigned long long)titleId);
+    if (!confirmBoxStatic("Install this title?",
+                          {fileNameOf(picked), std::string("Type: ") + titleIdKindName(titleId),
+                           std::string("Title id: ") + detail, "", "It will be installed to mlc01."}))
+      return;
     std::string msg;
     int r = cemu_installTitle(picked, std::string(DATA_DIR)+"/mlc01", installProgress, msg);
     toast(msg.c_str());
     if (r == 0) { ensureDefaultGameSource(); g_rescanAfterSettings = true; }
   } else {
     std::string fname = picked.substr(picked.find_last_of('/') + 1);
+    if (!confirmBoxStatic("Copy this game to the library?",
+                          {fname, "", "It will be copied into the games folder."}))
+      return;
     std::string gamesDir = std::string(DATA_DIR) + "/games";
     std::string dst = gamesDir + "/" + fname;
     if (picked == dst) { toastStatic("Already in the games folder"); return; }
@@ -5445,7 +5469,7 @@ static bool installedContentScreen(uint64_t baseTitleFilter = 0) {
 static void downloadAllCovers();
 static void libraryStorageScreen() {
   static int savedSelection=0;
-  constexpr int rowCount=7;
+  constexpr int rowCount=6;
   const int rowHeight=std::max(settingsRowH(),52);
   const int startY=settingsListY()+8;
   int sel=std::max(0,std::min(savedSelection,rowCount-1));
@@ -5461,8 +5485,7 @@ static void libraryStorageScreen() {
     else if(sel==2) networkSharesScreen();
     else if(sel==3) downloadAllCovers();
     else if(sel==4) installedContentScreen();
-    else if(sel==5) gfxPackScreen(0);
-    else doInstallFlow();
+    else gfxPackScreen(0);
     installedCount = cemu_scanInstalledComponents(std::string(DATA_DIR) + "/mlc01").size();
     folderCount=loadGameSources().size();
     shares=loadSmbSharesFromStore();
@@ -5504,8 +5527,8 @@ static void libraryStorageScreen() {
     std::string smbValue=std::to_string(mounted)+" / "+std::to_string(shares.size())+" connected";
     std::string installedValue = std::to_string(installedCount) +
                                  (installedCount == 1 ? " component" : " components");
-    const char *labels[rowCount]={"Game folders","File manager","SMB network shares","Download covers","Installed content","Graphics packs","Install update / DLC / game"};
-    const char *values[rowCount]={folderValue.c_str(),"SD / USB / SMB",smbValue.c_str(),"missing only",installedValue.c_str(),"browse / download","select package or folder"};
+    const char *labels[rowCount]={"Game folders","File manager","SMB network shares","Download covers","Installed content","Graphics packs"};
+    const char *values[rowCount]={folderValue.c_str(),"SD / USB / SMB",smbValue.c_str(),"missing only",installedValue.c_str(),"browse / download"};
     for(int row=0;row<rowCount;row++){
       const int slot=startY+row*rowHeight;
       const bool current=row==sel;

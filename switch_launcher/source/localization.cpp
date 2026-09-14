@@ -29,6 +29,9 @@ constexpr Entry ENTRIES[]={
  {"Library & storage","Bibliothèque et stockage","Bibliothek & Speicher","Biblioteca y almacenamiento","Libreria e archiviazione","Biblioteca e armazenamento"},
  {"Game folders","Dossiers de jeux","Spieleordner","Carpetas de juegos","Cartelle dei giochi","Pastas de jogos"},
  {"File manager","Gestionnaire de fichiers","Dateimanager","Gestor de archivos","Gestione file","Gestor de ficheiros"},
+ {"Install this title?","Installer ce titre ?","Diesen Titel installieren?","¿Instalar este título?","Installare questo titolo?","Instalar este título?"},
+ {"Copy this game to the library?","Copier ce jeu dans la bibliothèque ?","Dieses Spiel in die Bibliothek kopieren?","¿Copiar este juego a la biblioteca?","Copiare questo gioco nella libreria?","Copiar este jogo para a biblioteca?"},
+ {"Not installable","Non installable","Nicht installierbar","No instalable","Non installabile","Não instalável"},
  {"SMB network shares","Partages réseau SMB","SMB-Netzwerkfreigaben","Recursos SMB","Condivisioni SMB","Partilhas SMB"},
  {"Download covers","Télécharger les jaquettes","Cover herunterladen","Descargar carátulas","Scarica copertine","Transferir capas"},
  {"Cover settings","Paramètres de la jaquette","Cover-Einstellungen","Ajustes de la carátula","Impostazioni copertina","Definições da capa"},
@@ -140,7 +143,6 @@ constexpr Entry ENTRIES[]={
  {"Online & accounts","En ligne et comptes","Online & Konten","En línea y cuentas","Online e account","Online e contas"},
  {"Graphics packs","Packs graphiques","Grafikpakete","Paquetes gráficos","Pacchetti grafici","Pacotes gráficos"},
  {"Installed content","Contenu installé","Installierte Inhalte","Contenido instalado","Contenuti installati","Conteúdo instalado"},
- {"Install update / DLC / game","Installer une mise à jour / DLC / jeu","Update / DLC / Spiel installieren","Instalar actualización / DLC / juego","Installa aggiornamento / DLC / gioco","Instalar atualização / DLC / jogo"},
  {"missing only","manquantes uniquement","nur fehlende","solo faltantes","solo mancanti","apenas em falta"},
  {"New collection...","Nouvelle collection...","Neue Sammlung...","Nueva colección...","Nuova raccolta...","Nova coleção..."},
  {"Manage collections","Gérer les collections","Sammlungen verwalten","Gestionar colecciones","Gestisci raccolte","Gerir coleções"},
@@ -694,7 +696,6 @@ constexpr Entry ENTRIES[]={
  {"Edit","Modifier","Bearbeiten","Editar","Modifica","Editar"},
  {"Download graphics packs","Télécharger les packs graphiques","Grafikpakete herunterladen","Descargar packs gráficos","Scarica graphic pack","Transferir pacotes gráficos"},
  {"Locations","Emplacements","Speicherorte","Ubicaciones","Percorsi","Localizações"},
- {"Select title","Sélectionner un titre","Titel auswählen","Seleccionar título","Seleziona titolo","Selecionar título"},
  {"Select game folder","Sélectionner un dossier de jeux","Spieleordner auswählen","Seleccionar carpeta de juegos","Seleziona cartella dei giochi","Selecionar pasta de jogos"},
  {"A-Z","A-Z","A-Z","A-Z","A-Z","A-Z"},
  {"Recently played","Joué récemment","Zuletzt gespielt","Jugados recientemente","Giocati di recente","Jogados recentemente"},
@@ -709,7 +710,6 @@ constexpr Entry ENTRIES[]={
  {"Favorite / collections","Favori / collections","Favorit / Sammlungen","Favorito / colecciones","Preferito / raccolte","Favorito / coleções"},
  {"Delete game (remove from SD)","Supprimer le jeu (retirer de la SD)","Spiel löschen (von SD entfernen)","Eliminar juego (quitar de la SD)","Elimina gioco (rimuovi dalla SD)","Eliminar jogo (remover do SD)"},
  {"SD / USB / SMB","SD / USB / SMB","SD / USB / SMB","SD / USB / SMB","SD / USB / SMB","SD / USB / SMB"},
- {"select package or folder","choisir un paquet ou un dossier","Paket oder Ordner wählen","elegir paquete o carpeta","scegli pacchetto o cartella","escolher pacote ou pasta"},
 };
 
 void skipJsonWhitespace(const std::string& json,size_t& position)

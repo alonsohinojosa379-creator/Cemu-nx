@@ -253,30 +253,43 @@ uint64_t readAppTitleId(const std::string &appXmlPath) {
 
 } // namespace
 
+static bool findTitleBase(const std::string &srcFolder, std::string &base) {
+  struct stat st{};
+  base = srcFolder;
+  if (stat((base + "/code/app.xml").c_str(), &st) == 0)
+    return true;
+  DIR *dir = opendir(base.c_str());
+  if (!dir)
+    return false;
+  bool found = false;
+  while (dirent *entry = readdir(dir)) {
+    if (isDotEntry(entry->d_name))
+      continue;
+    const std::string candidate = base + "/" + entry->d_name;
+    if (stat((candidate + "/code/app.xml").c_str(), &st) == 0) {
+      base = candidate;
+      found = true;
+      break;
+    }
+  }
+  closedir(dir);
+  return found;
+}
+
+uint64_t cemu_peekTitleId(const std::string &srcFolder) {
+  std::string base;
+  if (!findTitleBase(srcFolder, base))
+    return 0;
+  const uint64_t tid = readAppTitleId(base + "/code/app.xml");
+  return ((tid >> 48) & 0xFFFF) == 0x0005 ? tid : 0;
+}
+
 int cemu_installTitle(const std::string &srcFolder, const std::string &mlcRoot,
                       void (*progress)(int), std::string &errMsg) {
-  struct stat st{};
-  std::string base = srcFolder;
-  if (stat((base + "/code/app.xml").c_str(), &st) != 0) {
-    DIR *dir = opendir(base.c_str());
-    bool found = false;
-    if (dir) {
-      while (dirent *entry = readdir(dir)) {
-        if (isDotEntry(entry->d_name))
-          continue;
-        const std::string candidate = base + "/" + entry->d_name;
-        if (stat((candidate + "/code/app.xml").c_str(), &st) == 0) {
-          base = candidate;
-          found = true;
-          break;
-        }
-      }
-      closedir(dir);
-    }
-    if (!found) {
-      errMsg = "No code/app.xml found - point to an extracted title folder";
-      return 1;
-    }
+  std::string base;
+  if (!findTitleBase(srcFolder, base)) {
+    errMsg = "No code/app.xml found - point to an extracted title folder";
+    return 1;
   }
 
   const uint64_t tid = readAppTitleId(base + "/code/app.xml");

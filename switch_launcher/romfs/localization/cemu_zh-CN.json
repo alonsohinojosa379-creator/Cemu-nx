@@ -118,7 +118,6 @@
   "Online & accounts": "在线与账户",
   "Graphics packs": "图形包",
   "Installed content": "已安装内容",
-  "Install update / DLC / game": "安装更新 / DLC / 游戏",
   "missing only": "仅缺失项",
   "New collection...": "新建合集...",
   "Manage collections": "管理合集",
@@ -458,7 +457,6 @@
   "Edit": "编辑",
   "Download graphics packs": "下载图形包",
   "Locations": "位置",
-  "Select title": "选择标题",
   "Select game folder": "选择游戏文件夹",
   "A-Z": "A-Z",
   "Recently played": "最近游玩",
@@ -473,5 +471,7 @@
   "Favorite / collections": "收藏 / 合集",
   "Delete game (remove from SD)": "删除游戏（从 SD 卡移除）",
   "SD / USB / SMB": "SD / USB / SMB",
-  "select package or folder": "选择安装包或文件夹"
+  "Install this title?": "安装此标题？",
+  "Copy this game to the library?": "将此游戏复制到库？",
+  "Not installable": "无法安装"
 }
