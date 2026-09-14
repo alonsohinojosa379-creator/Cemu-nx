@@ -7,6 +7,7 @@
 #include <string>
 
 #include "WindowSystem.h"
+#include "Cemu/Logging/CemuLogging.h"
 #include "Common/ExceptionHandler/ExceptionHandler.h"
 #include "audio/SwitchAudioAPI.h"
 #include "config/LaunchSettings.h"
@@ -240,6 +241,56 @@ static void SwitchPlatformExit()
 		romfsExit();
 }
 
+// Matches EXIT_DETECTION_STR in switch_launcher/fwd/main.c.
+static constexpr const char* kForwarderExitSentinel = "__CEMU_FORWARDER_EXIT__";
+static constexpr const char* kLauncherPath = "sdmc:/switch/cemu/cemu.nro";
+
+static std::string ForwarderLauncherPath()
+{
+	u64 programId = 0;
+	if (R_FAILED(svcGetInfo(&programId, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0)) || programId == 0)
+		return {};
+
+	char configPath[128]{};
+	std::snprintf(configPath, sizeof(configPath), "sdmc:/switch/cemu/forwarders/%016llx.cfg",
+	              (unsigned long long)programId);
+	FILE* config = std::fopen(configPath, "rb");
+	if (!config)
+		return {};
+
+	// <nro path>\0<arguments>\0, so the first string is the launcher.
+	char target[FS_MAX_PATH]{};
+	const size_t length = std::fread(target, 1, sizeof(target) - 1, config);
+	std::fclose(config);
+	target[length] = '\0';
+	return target;
+}
+
+static void ReturnToLauncher()
+{
+	const std::string forwarderPath = ForwarderLauncherPath();
+	if (!forwarderPath.empty())
+	{
+		cemuLog_log(LogType::Force, "Switch: restarting the forwarder to return to {}", forwarderPath);
+		cemuLog_waitForFlush();
+
+		// Does not return on success.
+		const Result restartResult = appletRestartProgram(nullptr, 0);
+		const Result launchResult = appletRequestLaunchApplication(0, nullptr);
+		if (R_SUCCEEDED(launchResult) && envHasNextLoad())
+		{
+			envSetNextLoad(forwarderPath.c_str(), kForwarderExitSentinel);
+			return;
+		}
+		cemuLog_log(LogType::Force,
+		            "Switch: no clean restart (0x{:08x}/0x{:08x}), chainloading in place",
+		            restartResult, launchResult);
+	}
+
+	if (envHasNextLoad())
+		envSetNextLoad(kLauncherPath, kLauncherPath);
+}
+
 int main(int argc, char* argv[])
 {
 	const bool platformInitialized = SwitchPlatformInit();
@@ -291,8 +342,8 @@ int main(int argc, char* argv[])
 		status = EXIT_FAILURE;
 	}
 
-	if (SwitchPlatform_ShouldReturnToLauncher() && envHasNextLoad())
-		envSetNextLoad("sdmc:/switch/cemu/cemu.nro", "sdmc:/switch/cemu/cemu.nro");
+	if (SwitchPlatform_ShouldReturnToLauncher())
+		ReturnToLauncher();
 	SwitchPlatformExit();
 	std::_Exit(status);
 }

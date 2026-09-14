@@ -545,8 +545,12 @@ namespace MemMapper
 		std::lock_guard<std::mutex> lock(s_mutex);
 		for (size_t i = 0; i < s_stackMaps.size();)
 		{
-			if (R_FAILED(svcUnmapMemory(s_stackMaps[i].dst, s_stackMaps[i].source, s_stackMaps[i].size)))
+			const Result rc = svcUnmapMemory(s_stackMaps[i].dst, s_stackMaps[i].source, s_stackMaps[i].size);
+			if (R_FAILED(rc))
 			{
+				cemuLog_log(LogType::Force, "Switch: guest alias at 0x{:x} ({}MB) not released: 0x{:08x}",
+				            reinterpret_cast<uintptr_t>(s_stackMaps[i].dst),
+				            s_stackMaps[i].size >> 20, rc);
 				++i;
 				continue;
 			}
@@ -555,9 +559,12 @@ namespace MemMapper
 		for (size_t i = 0; i < s_poolMaps.size();)
 		{
 			const PoolMap mapping = s_poolMaps[i];
-			if (R_FAILED(svcControlCodeMemory(mapping.handle, CodeMapOperation_UnmapOwner,
-			                                  mapping.dst, mapping.size, 0)))
+			const Result rc = svcControlCodeMemory(mapping.handle, CodeMapOperation_UnmapOwner,
+			                                       mapping.dst, mapping.size, 0);
+			if (R_FAILED(rc))
 			{
+				cemuLog_log(LogType::Force, "Switch: guest code map at 0x{:x} ({}MB) not released: 0x{:08x}",
+				            reinterpret_cast<uintptr_t>(mapping.dst), mapping.size >> 20, rc);
 				++i;
 				continue;
 			}
