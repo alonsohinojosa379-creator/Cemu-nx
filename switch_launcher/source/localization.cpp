@@ -579,7 +579,7 @@ constexpr Entry ENTRIES[]={
  {"No icon found - add a SteamGridDB key or download a cover first","No icon found - add a SteamGridDB key or download a cover first","No icon found - add a SteamGridDB key or download a cover first","No icon found - add a SteamGridDB key or download a cover first","No icon found - add a SteamGridDB key or download a cover first","No icon found - add a SteamGridDB key or download a cover first"},
  {"No imported accounts","No imported accounts","No imported accounts","No imported accounts","No imported accounts","No imported accounts"},
  {"No metadata was removed.","No metadata was removed.","No metadata was removed.","No metadata was removed.","No metadata was removed.","No metadata was removed."},
- {"No packs - use Download latest packs","No packs - use Download latest packs","No packs - use Download latest packs","No packs - use Download latest packs","No packs - use Download latest packs","No packs - use Download latest packs"},
+ {"No packs available for this game","No packs available for this game","No packs available for this game","No packs available for this game","No packs available for this game","No packs available for this game"},
  {"No shader caches found","No shader caches found","No shader caches found","No shader caches found","No shader caches found","No shader caches found"},
  {"Not enough free space","Not enough free space","Not enough free space","Not enough free space","Not enough free space","Not enough free space"},
  {"Not found","Not found","Not found","Not found","Not found","Not found"},

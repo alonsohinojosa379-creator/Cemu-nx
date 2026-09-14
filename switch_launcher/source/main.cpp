@@ -6765,6 +6765,12 @@ static void gfxPackScreen(uint64_t filterTitleId) {
   int sel = 0, top = 0, gameSel = 0;
   auto packVis = [&]() { int v = (SH - LIST_Y0 - 188) / ROW_H; return v < 1 ? 1 : v; };
   auto rowGap = [&](int index) { return mode==0&&top==0&&index>0?16:0; };
+  const int emptyPanelH = 96;
+  auto emptyPanelY = [&]() { return LIST_Y0 + ROW_H * 3 - (emptyPanelH - fontHeight(g_font_sm)) / 2; };
+  auto emptyButtonRect = [&]() {
+    const int w = std::min(420, SW - 120), h = 56;
+    return SDL_Rect{(SW - w) / 2, emptyPanelY() + emptyPanelH + 24, w, h};
+  };
   auto nextSelectable = [&](int from, int dir) { int n = (int)rows.size(); if (n == 0) return 0; int i = from;
     for (int k = 0; k < n; k++) { if (i >= 0 && i < n && !rows[i].header) return i; i = (i + dir + n) % n; } return from; };
   if (perGame) sel = nextSelectable(0, +1);
@@ -6787,6 +6793,13 @@ static void gfxPackScreen(uint64_t filterTitleId) {
         }
         if(touch==TOUCH_TAP){
           if(ty<topBarH()||ty>=SH-40){ SDL_Event back{}; back.type=SDL_CONTROLLERBUTTONDOWN; back.cbutton.button=BTN_CANCEL; SDL_PushEvent(&back); continue; }
+          if(perGame&&rows.empty()){
+            const SDL_Rect button=emptyButtonRect();
+            if(tx>=button.x&&tx<button.x+button.w&&ty>=button.y&&ty<button.y+button.h){
+              SDL_Event press{}; press.type=SDL_CONTROLLERBUTTONDOWN; press.cbutton.button=BTN_CONFIRM; SDL_PushEvent(&press);
+            }
+            continue;
+          }
           for(int visibleRow=0;visibleRow<vis&&top+visibleRow<nrows;visibleRow++){
             int y=LIST_Y0+visibleRow*ROW_H+rowGap(top+visibleRow);
             if(ty>=y&&ty<y+ROW_H){ int hit=top+visibleRow; if(mode==0||!rows[hit].header){ sel=hit; SDL_Event press{}; press.type=SDL_CONTROLLERBUTTONDOWN; press.cbutton.button=BTN_CONFIRM; SDL_PushEvent(&press); } break; }
@@ -6804,7 +6817,13 @@ static void gfxPackScreen(uint64_t filterTitleId) {
         if (mode == 1 && !perGame) { mode = 0; sel = gameSel; top = 0; beginScreenFx(); }
         else { if (!commit()) { toastStatic("Could not save graphics packs"); } return; }
       } else if (b == BTN_CONFIRM) {
-        if (mode == 0) {
+        if (perGame && rows.empty()) {
+          downloadLatestGraphicPacks();
+          load(packs);
+          rows = gfxBuildGameRows(packs, "", true);
+          sel = nextSelectable(0, +1); top = 0;
+          beginScreenFx();
+        } else if (mode == 0) {
           if (sel == 0) {
             downloadLatestGraphicPacks();
             load(packs); buildGames(games); sel = top = 0;
@@ -6854,9 +6873,11 @@ static void gfxPackScreen(uint64_t filterTitleId) {
       const int panelBottom = LIST_Y0 + (shown - 1) * ROW_H + rowGap(top + shown - 1) + ROW_H + 8;
       glassPanel(colX - 12, panelTop, colW + 24, panelBottom - panelTop);
     }
-    float ty = (float)(LIST_Y0 + (sel - top) * ROW_H + rowGap(sel) + 1);
-    g_hy = (!g_uiAnimations || g_hy < 0) ? ty : g_hy + (ty - g_hy) * 0.30f;
-    drawRowHighlight(colX, (int)g_hy, colW, ROW_H - 2);
+    if (nrows > 0) {
+      float ty = (float)(LIST_Y0 + (sel - top) * ROW_H + rowGap(sel) + 1);
+      g_hy = (!g_uiAnimations || g_hy < 0) ? ty : g_hy + (ty - g_hy) * 0.30f;
+      drawRowHighlight(colX, (int)g_hy, colW, ROW_H - 2);
+    }
     for (int r = 0; r < vis && top + r < nrows; r++) {
       int i = top + r, slotY = LIST_Y0 + r * ROW_H + rowGap(i); bool cur = (i == sel);
       if (mode == 0) {
@@ -6883,15 +6904,26 @@ static void gfxPackScreen(uint64_t filterTitleId) {
         drawWrapped(g_font_sm, colX + 6, fy, colW - 12, lineH, lines, p.description.c_str(), COL_DIM); }
     }
     if ((mode == 0 && games.empty()) || (mode == 1 && rows.empty())) {
-      const int emptyH = 96, emptyY = LIST_Y0 + ROW_H * 3 - (emptyH - fontHeight(g_font_sm)) / 2;
+      const int emptyH = emptyPanelH, emptyY = emptyPanelY();
       glassPanel(colX - 12, emptyY, colW + 24, emptyH);
-      drawStaticTextC(g_font_sm, SW / 2, LIST_Y0 + ROW_H * 3, "No packs - use Download latest packs", COL_DIM);
+      if (perGame)
+        drawStaticTextC(g_font_sm, SW / 2, LIST_Y0 + ROW_H * 3, "No packs available for this game", COL_DIM);
+      else
+        drawStaticTextC(g_font_sm, SW / 2, LIST_Y0 + ROW_H * 3, "No graphics packs installed", COL_DIM);
+      if (perGame) {
+        const SDL_Rect button = emptyButtonRect();
+        glassPanel(button.x, button.y, button.w, button.h);
+        drawRowHighlight(button.x + 6, button.y + 4, button.w - 12, button.h - 8);
+        drawStaticTextC(g_font, SW / 2, button.y + (button.h - fontHeight(g_font)) / 2,
+                        "Download latest packs", COL_VAL);
+      }
     }
     if (nrows > vis) { int trH = vis * ROW_H, trX = colX + colW + 16, trY = LIST_Y0 - 2; fillRect(trX, trY, 4, trH, (SDL_Color){40, 44, 54, 255});
       int thH = trH * vis / nrows, dn = (nrows - vis > 0 ? nrows - vis : 1); fillRect(trX, trY + (trH - thH) * top / dn, 4, thH, COL_SEL); }
     const bool packRow=sel>=0&&sel<(int)rows.size()&&!rows[sel].header;
     drawLocalizedFooter(mode==0?"A  Open       X  Info       B  Back":
-                        packRow?"A  Change       X  Info       B  Back":"B  Back");
+                        packRow?"A  Change       X  Info       B  Back":
+                        (perGame&&rows.empty())?"A  Download latest packs       B  Back":"B  Back");
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextUiFrame();
   }
 }
