@@ -5,6 +5,11 @@
 
 #include <zarchive/zarchivereader.h>
 
+#if defined(__SWITCH__)
+// libnx headers carry no C++ linkage guard.
+extern "C" bool fsdevCommitDevice(const char* name);
+#endif
+
 bool sTLInitialized{ false };
 fs::path sTLCacheFilePath;
 
@@ -168,6 +173,21 @@ void CafeTitleList::StoreCacheFile()
 
 	std::error_code ec;
 	fs::rename(tmpPath, sTLCacheFilePath, ec);
+	if (ec)
+	{
+		ec.clear();
+		fs::remove(sTLCacheFilePath, ec);
+		ec.clear();
+		fs::rename(tmpPath, sTLCacheFilePath, ec);
+	}
+	if (ec)
+	{
+		cemuLog_log(LogType::Force, "Unable to replace the title list cache: {}", ec.message());
+		return;
+	}
+#if defined(__SWITCH__)
+	fsdevCommitDevice("sdmc");
+#endif
 }
 
 void CafeTitleList::ClearScanPaths()

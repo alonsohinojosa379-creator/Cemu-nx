@@ -643,6 +643,7 @@ namespace WindowSystem
 			return false;
 		CafeTitleList::AddTitleFromPath(path);
 		AddInstalledTitleComponents(title.GetAppTitleId());
+		CafeTitleList::StoreCacheFile();
 		return CafeTitleList::FindBaseTitleId(title.GetAppTitleId(), baseTitleId);
 	}
 
