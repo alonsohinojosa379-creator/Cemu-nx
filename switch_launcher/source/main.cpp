@@ -1,3 +1,4 @@
+#include "SwitchAddressSpace.h"
 #include <switch.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
@@ -7945,6 +7946,36 @@ static bool isAppletMode() {
   return type!=AppletType_Application&&type!=AppletType_SystemApplication;
 }
 
+static void showLaunchError(SwitchLaunch::Error error) {
+  using SwitchLaunch::Error;
+  if(error==Error::None) return;
+  if(error==Error::AddressSpace36 || error==Error::AddressSpaceUnsupported){
+    modalMessageStatic("39-bit forwarder required",{
+      std::string(LauncherLocalization::Translate(error==Error::AddressSpace36 ?
+        "Cemu NX is running in 36-bit mode." : "This address-space mode is not supported.")),
+      "Recreate the forwarder with the built-in applet installer,",
+      "or use Sphaira and select a 39-bit address space.",
+      "Then launch Cemu from the new HOME Menu shortcut."});
+  } else if(error==Error::AddressSpaceUnknown){
+    modalMessageStatic("Cannot start game",{
+      "Cemu NX could not verify the process address space.",
+      "Launch through a 39-bit HOME Menu forwarder."});
+  } else if(error==Error::VulkanRequired){
+    modalMessageStatic("Vulkan required",{
+      "Host memory requires the Vulkan renderer.",
+      "Select Vulkan in the launcher graphics settings."});
+  } else if(error==Error::HostMemoryUnavailable){
+    modalMessageStatic("Host memory unavailable",{
+      "Cemu NX could not initialize host memory.",
+      "Close Cemu and launch it again from the HOME Menu.",
+      "Details: switch/cemu/last-core-error.log"});
+  } else {
+    modalMessageStatic("Cannot start game",{
+      "Cemu NX could not start the game.",
+      "Details: switch/cemu/last-core-error.log"});
+  }
+}
+
 static void runAppletInstaller() {
   LauncherLocalization::Initialize("system");
   const int panelWidth=std::min(SW-96,960),panelHeight=std::min(SH-96,500);
@@ -8015,7 +8046,12 @@ int main(int argc, char **argv){
   detectSystemLanguage();
   storeLoad(g_global,LAUNCHER_INI);
 
-  if(!positionalForwarderPath.empty()){
+  const auto pendingLaunchError=SwitchLaunch::TakeError();
+  const auto addressSpaceError=SwitchLaunch::AddressSpaceError(SwitchAddressSpaceBits());
+  const bool allowShortcutAutolaunch=SwitchLaunch::AllowShortcutAutolaunch(
+    pendingLaunchError,addressSpaceError,isAppletMode());
+
+  if(!positionalForwarderPath.empty() && allowShortcutAutolaunch){
     const char *directories[]={
       "sdmc:/switch",DATA_DIR,EMU_HOST_DIR,COVERS_DIR,GAMECFG_DIR,DEF_GAMEDIR,
       GAMEPROFILES_DIR,GRAPHICPACKS_DIR,LSFG_DIR,"sdmc:/switch/cemu/cache",
@@ -8275,6 +8311,7 @@ int main(int argc, char **argv){
     cleanupLauncher();
     return 0;
   }
+  showLaunchError(addressSpaceError!=SwitchLaunch::Error::None?addressSpaceError:pendingLaunchError);
   g_griddbReady = griddb_global_init();
   if(!g_griddbReady && R_SUCCEEDED(socketInitializeDefault())) g_storageSocketReady=true;
 
@@ -8360,6 +8397,10 @@ int main(int argc, char **argv){
   uint64_t launchTitleId=0;
 
   auto selectGame = [&](Game &game) {
+    if(addressSpaceError!=SwitchLaunch::Error::None){
+      showLaunchError(addressSpaceError);
+      return;
+    }
     recordPlayed(game);
     launchKey = game.key;
     launchPath = game.path;
@@ -8378,7 +8419,7 @@ int main(int argc, char **argv){
 
   bool forwarderRequested=false,forwarderMatched=false;
   std::string forwarderKey;
-  for(int ai=1; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
+  for(int ai=allowShortcutAutolaunch?1:argc; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
     forwarderRequested=true;
     forwarderKey=argv[ai+1];
     if (Game *game = findGameByKey(forwarderKey)){ selectGame(*game); forwarderMatched=true; }

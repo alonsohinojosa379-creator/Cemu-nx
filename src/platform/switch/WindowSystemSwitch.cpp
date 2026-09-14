@@ -25,6 +25,7 @@
 #include "platform/switch/SwitchJit.h"
 #include "platform/switch/SwitchLSFG.h"
 #include "platform/switch/SwitchMemory.h"
+#include "platform/switch/common/SwitchAddressSpace.h"
 #include "platform/switch/SwitchOverlay.h"
 #include "platform/switch/SwitchPlatform.h"
 #include "platform/switch/SwitchToys.h"
@@ -437,7 +438,12 @@ namespace WindowSystem
 		SetupPaths();
 		ActiveSettings::Init();
 		cemuLog_log(LogType::Force, "Switch: stack region {}", SwitchMemory_DescribeStackRegion());
-		cemuLog_log(LogType::Force, "Switch: MEM2 backed by {}", MemMapper::DescribeGuestBacking());
+
+		const unsigned addressBits = SwitchAddressSpaceBits();
+		cemuLog_log(LogType::Force, "Switch: process address space {} bits", addressBits);
+		const auto addressError = SwitchLaunch::AddressSpaceError(addressBits);
+		if (addressError != SwitchLaunch::Error::None)
+			throw SwitchLaunch::Failure(addressError, "Cemu NX requires a 39-bit forwarder");
 
 		GetConfigHandle().SetFilename(ActiveSettings::GetConfigPath("settings.xml").generic_wstring());
 		GetConfigHandle().Load();

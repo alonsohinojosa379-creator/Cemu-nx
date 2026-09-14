@@ -626,14 +626,8 @@ bool patch_npdm(std::vector<u8> &npdm, u64 tid)
     acid.program_id_min = tid;
     acid.program_id_max = tid;
 
-    // A system resource grant lets the emulator back guest RAM with
-    // svcMapPhysicalMemory, the one kind of mapping the GPU can import. 16 MiB
-    // covers the page tables for the largest guest layout; it is charged to
-    // the application pool, so it stays small. Written here as well as in the
-    // manifest, for the same reason as the kernel flags below.
-    constexpr u32 system_resource_size = 0x1000000;
-    if (meta.sys_resource_size < system_resource_size)
-        meta.sys_resource_size = system_resource_size;
+    meta.flags = static_cast<u8>((meta.flags & ~0x0Eu) | (3u << 1));
+    meta.sys_resource_size = 0;
 
     constexpr u32 kernel_flags_four_core = ((((3u << 8) | 0u) << 6 | 28u) << 6 | 63u) << 4;
     static_assert((kernel_flags_four_core | 0x7) == 0x030073F7);
