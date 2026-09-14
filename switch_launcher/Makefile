@@ -122,7 +122,10 @@ endif
 
 all: $(BUILD)
 
-$(BUILD):
+$(TOPDIR)/romfs/forwarder-icon.jpg: $(APP_ICON)
+	@cp "$<" "$@"
+
+$(BUILD): $(TOPDIR)/romfs/forwarder-icon.jpg
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
@@ -142,6 +145,9 @@ $(OUTPUT).nro	:	$(OUTPUT).elf $(OUTPUT).nacp
 else
 $(OUTPUT).nro	:	$(OUTPUT).elf
 endif
+
+# Repackage whenever staged core, hash or forwarder assets change.
+$(OUTPUT).nro : $(APP_ICON) $(shell find $(TOPDIR)/$(ROMFS) -type f)
 
 # The launcher consumes CMake's storage archives directly. Relink when the
 # backend or its NTFS dependency changes, even if launcher sources do not.
