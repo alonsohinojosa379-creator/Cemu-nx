@@ -2220,6 +2220,16 @@ static std::vector<GameSourceRecord> loadSavedGameSourceRecords() {
   return records;
 }
 
+static std::mutex g_gameSourceCacheMutex;
+static std::vector<GameSourceRecord> g_gameSourceCache;
+static uint64_t g_gameSourceCacheGeneration=0;
+static bool g_gameSourceCacheValid=false;
+
+static void invalidateGameSourceCache() {
+  std::lock_guard<std::mutex> lock(g_gameSourceCacheMutex);
+  g_gameSourceCacheValid=false;
+}
+
 static void persistGameSourceRecords(const std::vector<GameSourceRecord> &input) {
   std::vector<GameSourceRecord> records;
   std::unordered_set<std::string> seen;
@@ -2243,6 +2253,7 @@ static void persistGameSourceRecords(const std::vector<GameSourceRecord> &input)
       storeSet(g_global,("Wrapper/GamePathRelative"+std::to_string(index)).c_str(),records[index].relative.c_str());
     }
   }
+  invalidateGameSourceCache();
 }
 
 static bool resolveStableGameSource(GameSourceRecord &record,
@@ -2318,6 +2329,14 @@ static bool resolveStableGameSource(GameSourceRecord &record,
 
 static std::vector<GameSourceRecord> resolvedGameSourceRecords(bool allowRebind,
                                                                bool *persistChangedOutput=nullptr) {
+  const uint64_t usbGeneration=SwitchStorage::UsbStatusGeneration();
+  if(!allowRebind){
+    std::lock_guard<std::mutex> lock(g_gameSourceCacheMutex);
+    if(g_gameSourceCacheValid&&g_gameSourceCacheGeneration==usbGeneration){
+      if(persistChangedOutput) *persistChangedOutput=false;
+      return g_gameSourceCache;
+    }
+  }
   std::vector<GameSourceRecord> records=loadSavedGameSourceRecords();
   const auto locations=SwitchStorage::ListUsbLocations();
   bool persistChanged=false;
@@ -2366,6 +2385,12 @@ static std::vector<GameSourceRecord> resolvedGameSourceRecords(bool allowRebind,
     }
     resolved.push_back(std::move(record));
   }
+  {
+    std::lock_guard<std::mutex> lock(g_gameSourceCacheMutex);
+    g_gameSourceCache=resolved;
+    g_gameSourceCacheGeneration=usbGeneration;
+    g_gameSourceCacheValid=true;
+  }
   if(persistChangedOutput) *persistChangedOutput=persistChanged;
   return resolved;
 }
@@ -2373,6 +2398,20 @@ static std::vector<GameSourceRecord> resolvedGameSourceRecords(bool allowRebind,
 static std::vector<std::string> loadGameSources() {
   std::vector<std::string> paths;
   for(auto &record:resolvedGameSourceRecords(false))
+    if(!record.runtimePath.empty()) paths.push_back(std::move(record.runtimePath));
+  return paths;
+}
+
+static std::vector<std::string> loadGameSourcesFromWorkerCache() {
+  std::vector<GameSourceRecord> records;
+  bool cached=false;
+  {
+    std::lock_guard<std::mutex> lock(g_gameSourceCacheMutex);
+    if(g_gameSourceCacheValid){ records=g_gameSourceCache; cached=true; }
+  }
+  if(!cached) return loadGameSources();
+  std::vector<std::string> paths;
+  for(auto &record:records)
     if(!record.runtimePath.empty()) paths.push_back(std::move(record.runtimePath));
   return paths;
 }
@@ -5350,10 +5389,7 @@ static void libraryStorageScreen() {
   const int startY=settingsListY()+8;
   int sel=std::max(0,std::min(savedSelection,rowCount-1));
   size_t installedCount = cemu_scanInstalledComponents(std::string(DATA_DIR) + "/mlc01").size();
-  // Resolving game sources stats every configured root, so a USB folder costs
-  // a synchronous device round trip. Refresh it when a submenu can have
-  // changed it instead of once per rendered frame.
-  size_t folderCount=loadGameSources().size();
+  size_t folderCount=loadSavedGameSourceRecords().size();
   auto shares=loadSmbSharesFromStore();
   auto openRow=[&](){
     if(sel==0) gameSourcesScreen();
@@ -5363,7 +5399,7 @@ static void libraryStorageScreen() {
     else if(sel==4) installedContentScreen();
     else gfxPackScreen(0);
     installedCount = cemu_scanInstalledComponents(std::string(DATA_DIR) + "/mlc01").size();
-    folderCount=loadGameSources().size();
+    folderCount=loadSavedGameSourceRecords().size();
     shares=loadSmbSharesFromStore();
     beginScreenFx();
   };
@@ -8340,6 +8376,8 @@ int main(int argc, char **argv){
   std::vector<std::string> gamePaths=loadGameSources();
   bool hasUsbSource=hasConfiguredUsbSource(gamePaths)||hasConfiguredUsbBinding();
   std::atomic<bool> storageInitDone{false},storageInitCancel{false};
+  std::vector<GameSourceRecord> storageRebound;
+  bool storageReboundPersist=false;
   std::thread storageInitWorker([&]{
     SwitchStorage::SetUsbStatusCallback(usbStatusWake,nullptr);
     if(hasUsbSource&&!storageInitCancel.load()) SwitchStorage::InitializeUsb();
@@ -8347,6 +8385,9 @@ int main(int argc, char **argv){
       if(storageInitCancel.load()) break;
       if(share.autoMount){ std::string error; SwitchStorage::MountSmb(share,&error,&storageInitCancel); }
     }
+    // Rebinding stats USB, which blocks until the drive answers.
+    if(!storageInitCancel.load())
+      storageRebound=resolvedGameSourceRecords(true,&storageReboundPersist);
     storageInitDone=true;
     wakeUiFromWorker(0x53544f52);
   });
@@ -8427,8 +8468,15 @@ int main(int argc, char **argv){
       storageIntegrated=true;
       usbSnapshot=SwitchStorage::GetUsbSnapshot();
       usbGeneration=usbSnapshot.generation;
-      gamePaths=loadGameSources();
-      refreshConfiguredUsbSources(gamePaths);
+      gamePaths=loadGameSourcesFromWorkerCache();
+      // The worker already rebound these; only the ini write is left.
+      if(storageReboundPersist){
+        persistGameSourceRecords(storageRebound);
+        storeSave(g_global,LAUNCHER_INI);
+        storageReboundPersist=false;
+      }
+      storageRebound.clear();
+      storageRebound.shrink_to_fit();
       std::vector<std::string> mountedSources;
       for(const std::string &source:gamePaths)
         if(isUsbStoragePath(source)||source.rfind("cemusmb_",0)==0) mountedSources.push_back(source);
