@@ -8,7 +8,7 @@ CHECKSUMS="${NVK_DIR}/share/nvk-switch/SHA256SUMS"
 LOCAL_OBJECT="${NVK_DIR}/libnvk_local.o"
 LOCAL_ARCHIVE="${NVK_DIR}/libnvk_local.a"
 
-[[ -d "${NVK_DIR}/lib" ]] || die "NVK directory is missing: dependencies/switch_mesa_vulkan/lib"
+[[ -d "${NVK_DIR}/lib" ]] || die "NVK directory is missing: ${NVK_DIR}/lib"
 if [[ ! -f "${CHECKSUMS}" && ! -f "${NVK_DIR}/lib/pkgconfig/vulkan.pc" ]]; then
 	die "Mesa SDK metadata is missing under ${NVK_DIR}"
 fi

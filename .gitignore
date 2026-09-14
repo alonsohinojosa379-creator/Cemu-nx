@@ -39,6 +39,7 @@ bin/Cemu_*.exe
 /switch_launcher/romfs/fwd/
 /dependencies/switch_deps/
 /dependencies/switch_mesa_vulkan/
+/dependencies/switch_mesa_sdk_*/
 
 # Local tool checkouts superseded by switch_launcher/fwd
 /dependencies/hacbrewpack/
