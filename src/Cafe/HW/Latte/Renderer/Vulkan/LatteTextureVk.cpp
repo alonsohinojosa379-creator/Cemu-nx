@@ -21,6 +21,9 @@ LatteTextureVk::LatteTextureVk(class VulkanRenderer* vkRenderer, Latte::E_DIM di
 		effectiveBaseHeight = overwriteInfo.height;
 		effectiveBaseDepth = overwriteInfo.depth;
 	}
+	// Vulkan requires every extent to be at least one
+	effectiveBaseWidth = std::max(1, effectiveBaseWidth);
+	effectiveBaseHeight = std::max(1, effectiveBaseHeight);
 	effectiveBaseDepth = std::max(1, effectiveBaseDepth);
 
 	imageInfo.extent.width = effectiveBaseWidth;
