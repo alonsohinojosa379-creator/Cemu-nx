@@ -64,7 +64,7 @@ namespace TCL
 		return 0;
 	}
 
-	static constexpr uint32 TCL_RING_BUFFER_SIZE = 4096; // in U32s
+	static constexpr uint32 TCL_RING_BUFFER_SIZE = 256 * 1024;
 
 	std::atomic<uint32> tclRingBufferA[TCL_RING_BUFFER_SIZE];
 	std::atomic<uint32> tclRingBufferA_readIndex{0};
