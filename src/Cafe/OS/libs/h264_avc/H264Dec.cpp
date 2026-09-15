@@ -410,6 +410,18 @@ namespace H264
 
 	}
 
+	static H264DecoderBackend* _ReplaceDecoderSessionWithSoftware(uint32 handle)
+	{
+		std::unique_lock _lock(sDecoderSessionsMutex);
+		auto it = sDecoderSessions.find(handle);
+		if (it == sDecoderSessions.end())
+			return nullptr;
+		it->second->Destroy();
+		delete it->second;
+		it->second = CreateAVCDecoder();
+		return it->second;
+	}
+
 	static void _DestroyDecoderSession(uint32 handle)
 	{
 		std::unique_lock _lock(sDecoderSessionsMutex);
@@ -452,7 +464,15 @@ namespace H264
 		}
 		if (ctx->decoderState.isFirstBegin)
 		{
-			session->Init(ctx->Param.outputPerFrame == 0);
+			const bool isBufferedMode = ctx->Param.outputPerFrame == 0;
+			if (!isBufferedMode && !session->SupportsOutputPerFrame())
+			{
+				cemuLog_log(LogType::Force, "H264: title wants a frame per call, switching to the software decoder");
+				session = _ReplaceDecoderSessionWithSoftware(ctx->sessionHandle);
+				if (!session)
+					return 0;
+			}
+			session->Init(isBufferedMode);
 			ctx->decoderState.isFirstBegin = false;
 		}
 		else
@@ -649,6 +669,8 @@ namespace H264
 		return false;
 	}
 
+	static constexpr uint64 kDecodeStallTimeoutNs = 10000000000ull;
+
 	uint32 H264DECExecute(void* workMemory, void* imageOutput)
 	{
 		BenchmarkTimer bt;
@@ -681,7 +703,13 @@ namespace H264
 			while(true)
 			{
 				coreinit::OSEvent& evt = session->GetFrameOutputEvent();
-				coreinit::OSWaitEvent(&evt);
+				if (!coreinit::OSWaitEventWithTimeout(&evt, kDecodeStallTimeoutNs))
+				{
+					cemuLog_log(LogType::Force, "H264DECExecute: no frame after {}ms, reporting it undecodable",
+						kDecodeStallTimeoutNs / 1000000);
+					_ReleaseDecoderSession(session);
+					return 0x400;
+				}
 				H264DecoderBackend::DecodeResult decodeResult;
 				if( !session->GetFrameOutputIfReady(decodeResult) )
 					continue;

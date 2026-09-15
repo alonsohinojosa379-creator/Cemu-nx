@@ -12,9 +12,11 @@
 extern "C"
 {
 #include <libavcodec/avcodec.h>
+#include <libavutil/buffer.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/mem.h>
 #include <libavutil/pixfmt.h>
 }
 
@@ -41,6 +43,8 @@ namespace H264
 		{
 			Destroy();
 		}
+
+		bool SupportsOutputPerFrame() const override { return false; }
 
 		void Init(bool isBufferedMode) override
 		{
@@ -139,7 +143,7 @@ namespace H264
 
 		bool Open()
 		{
-			av_log_set_level(AV_LOG_QUIET);
+			av_log_set_level(AV_LOG_ERROR);
 			if (av_hwdevice_ctx_create(&m_deviceContext, AV_HWDEVICE_TYPE_NVTEGRA, nullptr, nullptr, 0) < 0)
 				return false;
 
@@ -202,9 +206,51 @@ namespace H264
 			return fallback;
 		}
 
+		static void FreeTransferBuffer(void* allocation, uint8_t*)
+		{
+			av_free(allocation);
+		}
+
+		bool EnsureTransferFrame(int width, int height)
+		{
+			if (m_transferFrame->data[0] && m_transferFrame->width == width &&
+				m_transferFrame->height == height)
+				return true;
+
+			av_frame_unref(m_transferFrame);
+			if (width <= 0 || height <= 0)
+				return false;
+
+			constexpr size_t kVicAlignment = 256;
+			const int pitch = static_cast<int>((static_cast<size_t>(width) + kVicAlignment - 1) & ~(kVicAlignment - 1));
+			const size_t lumaSize = static_cast<size_t>(pitch) * height;
+			const size_t total = lumaSize + lumaSize / 2;
+			auto* allocation = static_cast<uint8_t*>(av_malloc(total + kVicAlignment));
+			if (!allocation)
+				return false;
+			auto* aligned = reinterpret_cast<uint8_t*>(
+				(reinterpret_cast<uintptr_t>(allocation) + kVicAlignment - 1) & ~(uintptr_t)(kVicAlignment - 1));
+
+			m_transferFrame->buf[0] = av_buffer_create(aligned, total, FreeTransferBuffer, allocation, 0);
+			if (!m_transferFrame->buf[0])
+			{
+				av_free(allocation);
+				return false;
+			}
+			m_transferFrame->format = AV_PIX_FMT_NV12;
+			m_transferFrame->width = width;
+			m_transferFrame->height = height;
+			m_transferFrame->data[0] = aligned;
+			m_transferFrame->data[1] = aligned + lumaSize;
+			m_transferFrame->linesize[0] = pitch;
+			m_transferFrame->linesize[1] = pitch;
+			return true;
+		}
+
 		bool CopyFrame(AVFrame* frame, uint32 index)
 		{
-			av_frame_unref(m_transferFrame);
+			if (!EnsureTransferFrame(frame->width, frame->height))
+				return false;
 			if (av_hwframe_transfer_data(m_transferFrame, frame, 0) < 0)
 				return false;
 
