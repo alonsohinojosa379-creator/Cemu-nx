@@ -626,6 +626,22 @@ private:
 	VkBuffer m_xfbRingBuffer = VK_NULL_HANDLE;
 	VkDeviceMemory m_xfbRingBufferMemory = VK_NULL_HANDLE;
 
+	VkBuffer m_streamoutReadbackBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory m_streamoutReadbackMemory = VK_NULL_HANDLE;
+	uint8* m_streamoutReadbackPtr = nullptr;
+	uint32 m_streamoutReadbackSize = 0;
+	uint32 m_streamoutReadbackWriteOffset = 0;
+	struct StreamoutReadback
+	{
+		uint64 commandBufferId;
+		uint32 readbackOffset;
+		MPTR guestAddress;
+		uint32 size;
+	};
+	std::vector<StreamoutReadback> m_streamoutReadbacks;
+	bool EnsureStreamoutReadbackBuffer();
+	void ProcessStreamoutReadbacks();
+
 	// buffer cache (attributes, uniforms and streamout)
 	VkBuffer m_bufferCache = VK_NULL_HANDLE;
 	VkDeviceMemory m_bufferCacheMemory = VK_NULL_HANDLE;
@@ -662,6 +678,16 @@ private:
 	VkBuffer m_importedMem = VK_NULL_HANDLE;
 	VkDeviceMemory m_importedMemMemory = VK_NULL_HANDLE;
 	MPTR m_importedMemBaseAddress = 0;
+	bool IsImportedMemoryAddress(MPTR address) const;
+
+	struct StagedVertexBinding
+	{
+		MPTR address = MPTR_NULL;
+		uint32 size = 0;
+		uint64 commandBufferId = 0;
+		bool valid = false;
+	};
+	StagedVertexBinding m_stagedVertexBinding[LATTE_MAX_VERTEX_BUFFERS]{};
 #if defined(__SWITCH__)
 	struct HostMemoryWrite
 	{

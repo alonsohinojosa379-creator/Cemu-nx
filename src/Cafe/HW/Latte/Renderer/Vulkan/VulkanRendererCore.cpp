@@ -1768,6 +1768,12 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	LatteGPUState.drawCallCounter++;
 }
 
+bool VulkanRenderer::IsImportedMemoryAddress(MPTR address) const
+{
+	return address >= m_importedMemBaseAddress &&
+	       (address - m_importedMemBaseAddress) < mmuRange_MEM2.getSize();
+}
+
 // used in place of vertex/uniform caching when direct memory access is possible
 void VulkanRenderer::draw_updateVertexBuffersDirectAccess()
 {
@@ -1786,9 +1792,35 @@ void VulkanRenderer::draw_updateVertexBuffersDirectAccess()
 		{
 			bufferAddress = 0x10000000;
 		}
+		if (!IsImportedMemoryAddress(bufferAddress)) [[unlikely]]
+		{
+			cemuLog_logOnce(LogType::Force, "Vertex attribute buffer at 0x{:08x} is outside imported memory, staging it", bufferAddress);
+			m_state.currentVertexBinding[bufferIndex].offset = MPTR_NULL;
+			if (bufferSize == 0)
+				continue;
+			auto& staged = m_stagedVertexBinding[bufferIndex];
+			const uint64 currentCommandBufferId = GetCurrentCommandBufferId();
+			if (staged.valid && staged.address == bufferAddress &&
+			    staged.size == bufferSize &&
+			    staged.commandBufferId == currentCommandBufferId)
+				continue;
+			VKRSynchronizedRingAllocator& stagingAllocator = memoryManager->getStagingAllocator();
+			auto stagingResv = stagingAllocator.AllocateBufferMemory(bufferSize, 128);
+			if (!stagingResv.memPtr)
+				continue;
+			memcpy(stagingResv.memPtr, memory_getPointerFromVirtualOffset(bufferAddress), bufferSize);
+			stagingAllocator.FlushReservation(stagingResv);
+			VkBuffer stagedBuffer = stagingResv.vkBuffer;
+			VkDeviceSize stagedOffset = stagingResv.bufferOffset;
+			vkCmdBindVertexBuffers(m_state.currentCommandBuffer, bufferIndex, 1, &stagedBuffer, &stagedOffset);
+			staged.address = bufferAddress;
+			staged.size = bufferSize;
+			staged.commandBufferId = currentCommandBufferId;
+			staged.valid = true;
+			continue;
+		}
 		if (m_state.currentVertexBinding[bufferIndex].offset == bufferAddress)
 			continue;
-		cemu_assert_debug(bufferAddress >= m_importedMemBaseAddress && bufferAddress - m_importedMemBaseAddress < mmuRange_MEM2.getSize());
 		m_state.currentVertexBinding[bufferIndex].offset = bufferAddress;
 		VkBuffer attrBuffer = m_importedMem;
 		VkDeviceSize attrOffset = bufferAddress - m_importedMemBaseAddress;
@@ -1814,7 +1846,11 @@ bool VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader
 			}
 			uniformSize = std::min<uint32>(uniformSize, buf.size);
 
-			cemu_assert_debug(physicalAddr >= m_importedMemBaseAddress && physicalAddr - m_importedMemBaseAddress < mmuRange_MEM2.getSize());
+			if (!IsImportedMemoryAddress(physicalAddr)) [[unlikely]]
+			{
+				cemuLog_logOnce(LogType::Force, "Uniform buffer at 0x{:08x} is outside imported memory", physicalAddr);
+				physicalAddr = m_importedMemBaseAddress;
+			}
 
 			uint32 bufferIndex = i;
 			cemu_assert_debug(bufferIndex < 16);

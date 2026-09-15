@@ -2248,6 +2248,7 @@ void VulkanRenderer::ProcessFinishedCommandBuffers()
 			it = m_hostMemoryWrites.erase(it);
 		}
 #endif
+		ProcessStreamoutReadbacks();
 		LatteTextureReadback_UpdateFinishedTransfers(false);
 	}
 }
@@ -4196,6 +4197,47 @@ void VulkanRenderer::bufferCache_copy(uint32 srcOffset, uint32 dstOffset, uint32
 	barrier_sequentializeTransfer();
 }
 
+static constexpr uint32 kStreamoutReadbackSize = 16 * 1024 * 1024;
+
+bool VulkanRenderer::EnsureStreamoutReadbackBuffer()
+{
+	if (m_streamoutReadbackBuffer != VK_NULL_HANDLE)
+		return true;
+	if (!memoryManager->CreateBuffer(kStreamoutReadbackSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			m_streamoutReadbackBuffer, m_streamoutReadbackMemory))
+	{
+		m_streamoutReadbackBuffer = VK_NULL_HANDLE;
+		return false;
+	}
+	void* mapped = nullptr;
+	if (vkMapMemory(m_logicalDevice, m_streamoutReadbackMemory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS)
+	{
+		memoryManager->DeleteBuffer(m_streamoutReadbackBuffer, m_streamoutReadbackMemory);
+		m_streamoutReadbackBuffer = VK_NULL_HANDLE;
+		return false;
+	}
+	m_streamoutReadbackPtr = (uint8*)mapped;
+	m_streamoutReadbackSize = kStreamoutReadbackSize;
+	m_streamoutReadbackWriteOffset = 0;
+	return true;
+}
+
+void VulkanRenderer::ProcessStreamoutReadbacks()
+{
+	while (!m_streamoutReadbacks.empty())
+	{
+		const StreamoutReadback& entry = m_streamoutReadbacks.front();
+		if (!HasCommandBufferFinished(entry.commandBufferId))
+			break;
+		memcpy(memory_getPointerFromVirtualOffset(entry.guestAddress),
+		       m_streamoutReadbackPtr + entry.readbackOffset, entry.size);
+		m_streamoutReadbacks.erase(m_streamoutReadbacks.begin());
+	}
+	if (m_streamoutReadbacks.empty())
+		m_streamoutReadbackWriteOffset = 0;
+}
+
 void VulkanRenderer::bufferCache_copyStreamoutToMainBuffer(uint32 srcOffset, uint32 dstOffset, uint32 size)
 {
 	draw_endRenderPass();
@@ -4204,6 +4246,36 @@ void VulkanRenderer::bufferCache_copyStreamoutToMainBuffer(uint32 srcOffset, uin
 	if (m_useHostMemoryForCache)
 	{
 		// in host memory mode, dstOffset is physical address instead of cache address
+		if (!IsImportedMemoryAddress(dstOffset) ||
+		    !IsImportedMemoryAddress(dstOffset + size - 1)) [[unlikely]]
+		{
+			cemuLog_logOnce(LogType::Force, "Streamout target at 0x{:08x} is outside imported memory, copying it back", dstOffset);
+			if (!EnsureStreamoutReadbackBuffer() || size > m_streamoutReadbackSize)
+				return;
+			if (m_streamoutReadbackWriteOffset + size > m_streamoutReadbackSize)
+			{
+				if (!m_streamoutReadbacks.empty())
+					return;
+				m_streamoutReadbackWriteOffset = 0;
+			}
+			const uint32 readbackOffset = m_streamoutReadbackWriteOffset;
+			m_streamoutReadbackWriteOffset += size;
+
+			barrier_bufferRange<BUFFER_SHADER_WRITE, TRANSFER_READ,
+				ANY_TRANSFER | BUFFER_SHADER_READ, TRANSFER_WRITE>(
+					m_xfbRingBuffer, srcOffset, size,
+					m_streamoutReadbackBuffer, readbackOffset, size);
+			barrier_sequentializeTransfer();
+			VkBufferCopy readbackCopy{};
+			readbackCopy.srcOffset = srcOffset;
+			readbackCopy.dstOffset = readbackOffset;
+			readbackCopy.size = size;
+			vkCmdCopyBuffer(m_state.currentCommandBuffer, m_xfbRingBuffer,
+			                m_streamoutReadbackBuffer, 1, &readbackCopy);
+			barrier_sequentializeTransfer();
+			m_streamoutReadbacks.push_back({GetCurrentCommandBufferId(), readbackOffset, dstOffset, size});
+			return;
+		}
 #if defined(__SWITCH__)
 		SwitchMemory_FlushForGpuWrite(memory_getPointerFromVirtualOffset(dstOffset), size);
 #endif
