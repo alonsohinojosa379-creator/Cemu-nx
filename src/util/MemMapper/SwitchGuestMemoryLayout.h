@@ -10,19 +10,21 @@ namespace MemMapper::SwitchGuestMemoryLayout
 	constexpr uintptr_t Mem2End = 0x50000000;
 	constexpr uintptr_t GuestSize = 0x100000000ull;
 
+	constexpr uintptr_t MainStackGap = 0x00400000;
+	constexpr uintptr_t CodeEnd = Mem2Begin - MainStackGap;
+
 	constexpr Range MappedRanges[] = {
-		{0, Mem2End},
+		{0, CodeEnd},
+		{Mem2Begin, Mem2End},
 		{0xA0000000, 0xBC000000},
 		{0xE0000000, 0xEA000000},
 		{0xF4000000, 0xFA000000},
 		{0xFFC00000, GuestSize},
 	};
 
-	// query(address, end, free) returns the end and availability of a host block.
-	// The caller holds virtmemLock and includes heap/alias regions and its reservations
-	// in that view, even when the kernel reports those addresses as unmapped.
 	template<typename Query>
-	uintptr_t FindBase(Range stack, Range aslr, Query query)
+	uintptr_t FindBase(Range stack, Range aslr, Query query,
+	                   size_t* blockedRange = nullptr, uintptr_t* blockedAt = nullptr)
 	{
 		if (stack.end <= stack.begin || aslr.end <= aslr.begin ||
 			stack.end < Mem2End || stack.end - stack.begin < Mem2End - Mem2Begin ||
@@ -33,6 +35,7 @@ namespace MemMapper::SwitchGuestMemoryLayout
 		while (base <= last)
 		{
 			uintptr_t nextBase = base;
+			size_t rangeIndex = 0;
 			for (const Range& range : MappedRanges)
 			{
 				for (uintptr_t address = base + range.begin; address < base + range.end;)
@@ -43,6 +46,8 @@ namespace MemMapper::SwitchGuestMemoryLayout
 						return 0;
 					if (!free)
 					{
+						if (blockedRange) *blockedRange = rangeIndex;
+						if (blockedAt) *blockedAt = address;
 						nextBase = end - range.begin;
 						break;
 					}
@@ -50,6 +55,7 @@ namespace MemMapper::SwitchGuestMemoryLayout
 				}
 				if (nextBase != base)
 					break;
+				rangeIndex++;
 			}
 			if (nextBase == base)
 				return base;

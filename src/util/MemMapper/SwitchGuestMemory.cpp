@@ -30,7 +30,7 @@ namespace MemMapper::SwitchGuestMemory
 		constinit Reservation s_pending{};
 		constinit StackSnapshot s_beforeServices{};
 		constinit bool s_attempted = false;
-		constinit char s_note[192] = "early reservation not attempted";
+		constinit char s_note[288] = "early reservation not attempted";
 		static_assert(std::is_trivial_v<Reservation> && std::is_trivial_v<StackSnapshot>);
 
 		Result getRange(InfoType addressInfo, InfoType sizeInfo, Range& range)
@@ -142,6 +142,8 @@ namespace MemMapper::SwitchGuestMemory
 			virtmemUnlock();
 			return;
 		}
+		size_t blockedRange = 0;
+		uintptr_t blockedAt = 0;
 		const uintptr_t base = FindBase(s_beforeServices.region, aslr, [&](uintptr_t address, uintptr_t& end, bool& free) {
 			MemoryInfo info{};
 			rc = query(address, info);
@@ -160,10 +162,15 @@ namespace MemMapper::SwitchGuestMemory
 					end = std::min(end, excluded.begin);
 			}
 			return true;
-		});
+		}, &blockedRange, &blockedAt);
 		if (!base)
 		{
-			std::snprintf(s_note, sizeof(s_note), "no compatible 1024MB MEM2 window before services (query rc=0x%08x)", (unsigned)rc);
+			std::snprintf(s_note, sizeof(s_note),
+				"no compatible 1024MB MEM2 window before services (query rc=0x%08x, "
+				"blocked in range %zu at 0x%llx; heap 0x%llx..0x%llx alias 0x%llx..0x%llx)",
+				(unsigned)rc, blockedRange, (unsigned long long)blockedAt,
+				(unsigned long long)heap.begin, (unsigned long long)heap.end,
+				(unsigned long long)alias.begin, (unsigned long long)alias.end);
 			virtmemUnlock();
 			return;
 		}

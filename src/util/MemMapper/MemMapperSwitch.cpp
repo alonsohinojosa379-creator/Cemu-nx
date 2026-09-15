@@ -305,7 +305,8 @@ namespace MemMapper
 		struct Zone { uintptr_t start, end; };
 		constexpr uintptr_t kMem2Start = 0x10000000;
 		const Zone kZones[] = {
-			{0x00010000, 0x10000000},     // LOW0 + TRAMPOLINE + CODECAVE + TEXT + CEMU
+			// Ends below MEM2: the gap there holds the main thread stack.
+			{0x00010000, SwitchGuestMemoryLayout::CodeEnd}, // LOW0 + TRAMPOLINE + CODECAVE + TEXT + CEMU
 			{0x10000000, 0x50000000},     // MEM2, the only zone the GPU reads
 			{0xF4000000, 0xFA000000},     // MEM1 + RPLLOADER + SHARED
 			{0xFFC00000, 0x100000000ull}, // CORE0/1/2 locked cache + PER-CORE
