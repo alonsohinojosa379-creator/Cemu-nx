@@ -666,6 +666,23 @@ void LatteRenderTarget_trackUpdates()
 	}
 }
 
+#if defined(__SWITCH__)
+namespace
+{
+	// The last image copied to each scan buffer, which the Wii U keeps scanning out.
+	struct ScanBufferSource
+	{
+		bool valid = false;
+		MPTR colorBufferPtr = MPTR_NULL;
+		uint32 width = 0, height = 0, sliceIndex = 0, format = 0, pitch = 0, swizzle = 0;
+		Latte::E_HWTILEMODE tilemode{};
+	};
+	constexpr uint32 kScanTargets[2] = { RENDER_TARGET_TV, RENDER_TARGET_DRC };
+	ScanBufferSource s_scanSource[2];
+	bool s_scanCopiedSinceSwap[2]{};
+}
+#endif
+
 void LatteRenderTarget_itHLESwapScanBuffer()
 {
 	performanceMonitor.cycle[performanceMonitor.cycleIndex].frameCounter++;
@@ -674,6 +691,15 @@ void LatteRenderTarget_itHLESwapScanBuffer()
 	LattePerformanceMonitor_frameEnd();
 	LatteGPUState.frameCounter++;
 #if defined(__SWITCH__)
+	// A swap with no copy shows the previous image, not a cleared swapchain image.
+	for (size_t i = 0; i < 2; i++)
+	{
+		const ScanBufferSource source = s_scanSource[i];
+		if (!s_scanCopiedSinceSwap[i] && source.valid)
+			LatteRenderTarget_itHLECopyColorBufferToScanBuffer(source.colorBufferPtr, source.width, source.height,
+				source.sliceIndex, source.format, source.pitch, source.tilemode, source.swizzle, kScanTargets[i]);
+		s_scanCopiedSinceSwap[i] = false;
+	}
 	LatteRenderTarget_finalizeCompositeFrame();
 #endif
 	g_renderer->SwapBuffers(true, true);
@@ -1030,6 +1056,14 @@ void LatteRenderTarget_itHLECopyColorBufferToScanBuffer(MPTR colorBufferPtr, uin
 	}
 
 #if defined(__SWITCH__)
+	for (size_t i = 0; i < 2; i++)
+	{
+		if (!(renderTarget & kScanTargets[i]))
+			continue;
+		s_scanSource[i] = { true, colorBufferPtr, colorBufferWidth, colorBufferHeight, colorBufferSliceIndex,
+			colorBufferFormat, colorBufferPitch, colorBufferSwizzle, colorBufferTilemode };
+		s_scanCopiedSinceSwap[i] = true;
+	}
 	if (SwitchPlatform_IsGamePadOnly())
 	{
 		if (renderTarget & RENDER_TARGET_DRC)
