@@ -1446,10 +1446,7 @@ static bool loadLauncherFonts(){
   if(g_requestedFontType==requested&&g_font_sm&&g_font&&g_font_big&&g_font_caption&&
      g_fontScale==g_uiScale) return true;
   TTF_Font *small=nullptr,*normal=nullptr,*large=nullptr,*caption=nullptr;
-  if(!openLauncherFontSet(requested,small,normal,large,caption)){
-    if(requested==PlSharedFontType_Standard||
-       !openLauncherFontSet(PlSharedFontType_Standard,small,normal,large,caption)) return false;
-  }
+  if(!openLauncherFontSet(requested,small,normal,large,caption)) return false;
   clearTextCaches();
   destroyGlyphs();
   if(g_font_sm) TTF_CloseFont(g_font_sm);
@@ -4980,8 +4977,14 @@ static void launcherSettingsScreen() {
   const int updateRow=listCount,selectionCount=listCount+1;
   int sel=std::max(0,std::min(savedSelection,selectionCount-1)),top=std::max(0,savedTop);
   auto applyChange=[&](){
+    const std::string previousLanguage(LauncherLocalization::Preference());
     LauncherLocalization::Initialize(storeGet(g_global,"Wrapper/Language","system"));
-    if(!loadLauncherFonts()) toast("Could not load the selected language font");
+    if(!loadLauncherFonts()){
+      LauncherLocalization::Initialize(previousLanguage);
+      storeSet(g_global,"Wrapper/Language",previousLanguage.c_str());
+      (void)loadLauncherFonts();
+      toast("Could not load the selected language font");
+    }
     applyLauncherAppearance();
     uiAudioSetEnabled(strcmp(storeGet(g_global,"Wrapper/UiSounds","true"),"false")!=0);
   };
@@ -8312,7 +8315,10 @@ int main(int argc, char **argv){
 
   if(R_FAILED(plInitialize(PlServiceType_User))) return startupFailure("System font service initialization failed.");
   g_plReady = true;
-  if(!loadLauncherFonts()) return startupFailure("Could not load the system font.");
+  if(!loadLauncherFonts()){
+    LauncherLocalization::Initialize("en");
+    if(!loadLauncherFonts()) return startupFailure("Could not load the system font.");
+  }
   if(isAppletMode()){
     (void)ensureDirectory("sdmc:/switch");
     (void)ensureDirectory(DATA_DIR);
@@ -8369,7 +8375,14 @@ int main(int argc, char **argv){
     if(columns<3||columns>8){ storeSet(g_global,"Wrapper/GridColumns","5"); changed=true; }
     if(changed) storeSave(g_global,LAUNCHER_INI);
   }
+  const std::string fallbackLanguage(LauncherLocalization::Preference());
   LauncherLocalization::Initialize(storeGet(g_global,"Wrapper/Language","system"));
+  if(!loadLauncherFonts()){
+    LauncherLocalization::Initialize(fallbackLanguage);
+    if(!loadLauncherFonts()) return startupFailure("Could not load the system font.");
+    storeSet(g_global,"Wrapper/Language",fallbackLanguage.c_str());
+    storeSave(g_global,LAUNCHER_INI);
+  }
   applyLauncherAppearance();
   uiAudioSetEnabled(strcmp(storeGet(g_global,"Wrapper/UiSounds","true"),"false")!=0);
   startCoverDecodeWorker();

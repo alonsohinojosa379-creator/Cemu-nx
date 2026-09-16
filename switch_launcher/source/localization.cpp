@@ -1,4 +1,5 @@
 #include "localization.h"
+#include "localization_zh.h"
 
 #include <switch.h>
 
@@ -712,114 +713,6 @@ constexpr Entry ENTRIES[]={
  {"SD / USB / SMB","SD / USB / SMB","SD / USB / SMB","SD / USB / SMB","SD / USB / SMB","SD / USB / SMB"},
 };
 
-void skipJsonWhitespace(const std::string& json,size_t& position)
-{
- while(position<json.size()&&(json[position]==' '||json[position]=='\t'||json[position]=='\r'||json[position]=='\n')) position++;
-}
-
-int hexDigit(char value)
-{
- if(value>='0'&&value<='9') return value-'0';
- if(value>='a'&&value<='f') return value-'a'+10;
- if(value>='A'&&value<='F') return value-'A'+10;
- return -1;
-}
-
-bool appendUtf8(std::string& output,uint32_t codepoint)
-{
- if(codepoint<=0x7f) output.push_back(static_cast<char>(codepoint));
- else if(codepoint<=0x7ff){output.push_back(static_cast<char>(0xc0|(codepoint>>6)));output.push_back(static_cast<char>(0x80|(codepoint&0x3f)));}
- else if(codepoint<=0xffff){
-  if(codepoint>=0xd800&&codepoint<=0xdfff) return false;
-  output.push_back(static_cast<char>(0xe0|(codepoint>>12)));output.push_back(static_cast<char>(0x80|((codepoint>>6)&0x3f)));output.push_back(static_cast<char>(0x80|(codepoint&0x3f)));
- }
- else if(codepoint<=0x10ffff){output.push_back(static_cast<char>(0xf0|(codepoint>>18)));output.push_back(static_cast<char>(0x80|((codepoint>>12)&0x3f)));output.push_back(static_cast<char>(0x80|((codepoint>>6)&0x3f)));output.push_back(static_cast<char>(0x80|(codepoint&0x3f)));}
- else return false;
- return true;
-}
-
-bool parseJsonString(const std::string& json,size_t& position,std::string& output)
-{
- if(position>=json.size()||json[position]!='"') return false;
- output.clear(); position++;
- while(position<json.size()){
-  const unsigned char value=static_cast<unsigned char>(json[position++]);
-  if(value=='"') return true;
-  if(value<0x20) return false;
-  if(value!='\\'){output.push_back(static_cast<char>(value));continue;}
-  if(position>=json.size()) return false;
-  const char escaped=json[position++];
-  switch(escaped){
-   case '"': output.push_back('"'); break;
-   case '\\': output.push_back('\\'); break;
-   case '/': output.push_back('/'); break;
-   case 'b': output.push_back('\b'); break;
-   case 'f': output.push_back('\f'); break;
-   case 'n': output.push_back('\n'); break;
-   case 'r': output.push_back('\r'); break;
-   case 't': output.push_back('\t'); break;
-   case 'u': {
-    if(position+4>json.size()) return false;
-    uint32_t codepoint=0;
-    for(int digit=0;digit<4;digit++){const int part=hexDigit(json[position++]);if(part<0)return false;codepoint=(codepoint<<4)|static_cast<uint32_t>(part);}
-    if(codepoint>=0xd800&&codepoint<=0xdbff){
-     if(position+6>json.size()||json[position]!='\\'||json[position+1]!='u') return false;
-     position+=2; uint32_t low=0;
-     for(int digit=0;digit<4;digit++){const int part=hexDigit(json[position++]);if(part<0)return false;low=(low<<4)|static_cast<uint32_t>(part);}
-     if(low<0xdc00||low>0xdfff) return false;
-     codepoint=0x10000+((codepoint-0xd800)<<10)+(low-0xdc00);
-    }
-    if(!appendUtf8(output,codepoint)) return false;
-    break;
-   }
-   default: return false;
-  }
- }
- return false;
-}
-
-bool readTranslationFile(const char* path,std::string& contents)
-{
- FILE* file=fopen(path,"rb");
- if(!file) return false;
- bool valid=fseek(file,0,SEEK_END)==0;
- const long length=valid?ftell(file):-1;
- valid=valid&&length>=0&&length<=1024*1024&&fseek(file,0,SEEK_SET)==0;
- if(valid){contents.assign(static_cast<size_t>(length),'\0');valid=contents.empty()||fread(contents.data(),1,contents.size(),file)==contents.size();}
- if(fclose(file)!=0) valid=false;
- if(!valid) contents.clear();
- return valid;
-}
-
-bool loadJsonTranslations(const char* path)
-{
- std::string json;
- if(!readTranslationFile(path,json)) return false;
- size_t position=json.size()>=3&&static_cast<unsigned char>(json[0])==0xef&&static_cast<unsigned char>(json[1])==0xbb&&static_cast<unsigned char>(json[2])==0xbf?3:0;
- skipJsonWhitespace(json,position);
- if(position>=json.size()||json[position++]!='{') return false;
- std::unordered_map<std::string,std::string> translations;
- for(;;){
-  skipJsonWhitespace(json,position);
-  if(position<json.size()&&json[position]=='}'){position++;break;}
-  std::string key,value;
-  if(!parseJsonString(json,position,key)) return false;
-  skipJsonWhitespace(json,position);
-  if(position>=json.size()||json[position++]!=':') return false;
-  skipJsonWhitespace(json,position);
-  if(!parseJsonString(json,position,value)||!translations.emplace(std::move(key),std::move(value)).second) return false;
-  skipJsonWhitespace(json,position);
-  if(position>=json.size()) return false;
-  if(json[position]=='}'){position++;break;}
-  if(json[position++]!=',') return false;
- }
- skipJsonWhitespace(json,position);
- if(position!=json.size()) return false;
- for(const Entry& entry:ENTRIES) if(translations.find(entry.en)==translations.end()) return false;
- s_translations=std::move(translations);
- return true;
-}
-
 std::string systemLanguage()
 {
  if(R_FAILED(setInitialize())) return "en";
@@ -837,8 +730,12 @@ void Initialize(std::string_view preference)
  s_preference=preference.empty()?"system":std::string(preference); s_language=s_preference=="system"?systemLanguage():s_preference;
  if(FindLanguage(s_language)<1) s_language="en";
  s_translations.clear();
- if(s_language=="zh-CN"){loadJsonTranslations("romfs:/localization/cemu_zh-CN.json");return;}
- if(s_language=="zh-TW"){loadJsonTranslations("romfs:/localization/cemu_zh-TW.json");return;}
+ if(s_language=="zh-CN"||s_language=="zh-TW"){
+  const bool traditional=s_language=="zh-TW";
+  for(const ChineseEntry& entry:CHINESE_ENTRIES)
+   s_translations.emplace(entry.en,traditional?entry.zhHant:entry.zhHans);
+  return;
+ }
  const int column=s_language=="fr"?1:s_language=="de"?2:s_language=="es"?3:s_language=="it"?4:s_language=="pt"?5:0;
  if(!column) return;
  for(const Entry& entry:ENTRIES){const char* values[]={entry.en,entry.fr,entry.de,entry.es,entry.it,entry.pt};s_translations.emplace(entry.en,values[column]);}
