@@ -94,6 +94,15 @@ void LatteQueryObjectVk::endFragment()
 
 void LatteQueryObjectVk::handleFinishedFragments()
 {
+	if (!m_rendererVk->m_occlusionQueries.resultsAreCoherent && !list_queryFragments.empty())
+	{
+		VkMappedMemoryRange range{};
+		range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+		range.memory = m_rendererVk->m_occlusionQueries.memoryQueryResults;
+		range.offset = 0;
+		range.size = VK_WHOLE_SIZE;
+		vkInvalidateMappedMemoryRanges(m_rendererVk->m_logicalDevice, 1, &range);
+	}
 	// remove finished fragments and add to m_acccumulatedSum
 	while (!list_queryFragments.empty())
 	{

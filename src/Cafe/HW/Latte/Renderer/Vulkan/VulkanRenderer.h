@@ -765,6 +765,7 @@ private:
 		uint64 m_lastCommandBuffer{};
 		// query result buffer
 		VkBuffer bufferQueryResults;
+		bool resultsAreCoherent{true};
 		VkDeviceMemory memoryQueryResults;
 		uint64* ptrQueryResults;
 		std::vector<uint16> list_availableQueryIndices;

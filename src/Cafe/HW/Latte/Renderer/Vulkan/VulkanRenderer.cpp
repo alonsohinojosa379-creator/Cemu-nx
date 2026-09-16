@@ -873,6 +873,7 @@ VulkanRenderer::VulkanRenderer() : Renderer(RendererAPI::Vulkan)
 	{
 		if (!memoryManager->CreateBuffer(OCCLUSION_QUERY_POOL_SIZE * sizeof(uint64), VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, m_occlusionQueries.bufferQueryResults, m_occlusionQueries.memoryQueryResults))
 			UnrecoverableError("Failed to allocate the Vulkan occlusion query buffer");
+		m_occlusionQueries.resultsAreCoherent = false;
 	}
 	m_occlusionQueries.ptrQueryResults = static_cast<uint64*>(mapMemory(m_occlusionQueries.memoryQueryResults, "the Vulkan occlusion query buffer"));
 
