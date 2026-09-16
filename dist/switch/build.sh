@@ -5,7 +5,7 @@ export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
 SWITCH_BUILD_DIR="${SWITCH_BUILD_DIR:-build_switch}"
-RELEASE_VERSION="${RELEASE_VERSION:-1.1.3}"
+RELEASE_VERSION="${RELEASE_VERSION:-1.2.0}"
 case "${BUILD_JOBS}" in
 	''|*[!0-9]*|0) echo "BUILD_JOBS must be a positive integer" >&2; exit 2 ;;
 esac
