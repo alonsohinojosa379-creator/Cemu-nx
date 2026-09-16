@@ -24,11 +24,9 @@ VirtualBufferHeap_t* virtualBufferHeap_create(uint32 virtualHeapSize, void* base
 VirtualBufferHeapEntry_t* virtualBufferHeap_createEntry(VirtualBufferHeap_t* bufferHeap)
 {
 	VirtualBufferHeapEntry_t* newEntry = bufferHeap->firstUnusedEntry;
+	// Out of entries is the caller's to handle, the same as running out of space.
 	if (newEntry == nullptr)
-	{
-		cemuLog_log(LogType::Force, "virtualBufferHeap_createEntry: Pool empty");
-		cemu_assert_suspicious();
-	}
+		return nullptr;
 	bufferHeap->firstUnusedEntry = newEntry->next;
 	newEntry->previous = NULL;
 	newEntry->next = NULL;
@@ -54,6 +52,8 @@ VirtualBufferHeapEntry_t* virtualBufferHeap_allocate(VirtualBufferHeap_t* buffer
 	{
 		// entire heap is unallocated
 		VirtualBufferHeapEntry_t* newEntry = virtualBufferHeap_createEntry(bufferHeap);
+		if (newEntry == nullptr)
+			return nullptr;
 		newEntry->startOffset = 0;
 		newEntry->endOffset = size;
 		newEntry->previous = NULL;
@@ -85,6 +85,8 @@ VirtualBufferHeapEntry_t* virtualBufferHeap_allocate(VirtualBufferHeap_t* buffer
 					return nullptr; // out of heap memory
 				// free space found
 				VirtualBufferHeapEntry_t* newEntry = virtualBufferHeap_createEntry(bufferHeap);
+				if (newEntry == nullptr)
+					return nullptr;
 				newEntry->startOffset = currentAllocationOffset;
 				newEntry->endOffset = currentAllocationOffset + size;
 				// insert between previous entry and entryItr
@@ -104,6 +106,8 @@ VirtualBufferHeapEntry_t* virtualBufferHeap_allocate(VirtualBufferHeap_t* buffer
 		if ((currentAllocationOffset + size) > bufferHeap->virtualSize)
 			return NULL; // out of heap memory
 		VirtualBufferHeapEntry_t* newEntry = virtualBufferHeap_createEntry(bufferHeap);
+		if (newEntry == nullptr)
+			return nullptr;
 		newEntry->startOffset = currentAllocationOffset;
 		newEntry->endOffset = currentAllocationOffset + size;
 		// insert after previous entry
