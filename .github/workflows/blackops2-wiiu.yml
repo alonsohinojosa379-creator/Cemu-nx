@@ -1,0 +1,46 @@
+name: Black Ops II (Wii U)
+
+# Pestaña Actions -> "Black Ops II (Wii U)" -> Run workflow.
+# Al terminar, el zip para la SD queda en "Artifacts" (blackops2-wiiu-card).
+# Solo necesita blackops2-wiiu.patch en la raiz del repo (tu fork de Cemu-nx).
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: devkitpro/devkita64:latest
+    timeout-minutes: 60
+    steps:
+      - name: Herramientas
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl zip python3 python3-pil
+
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Aplicar el parche de Black Ops II (sobre Cemu-nx 1.2.0)
+        run: |
+          git config --global --add safe.directory '*'
+          cp blackops2-wiiu.patch /tmp/juego.patch
+          git config user.name "build"
+          git config user.email "build@localhost"
+          base=69cf06ee875a5c25f3e2ad43f0a8e9624a5a79b6
+          git fetch --depth 1 https://github.com/NaGaa95/Cemu-nx.git "$base"
+          git checkout --force FETCH_HEAD
+          git am /tmp/juego.patch
+          git log -2 --oneline
+
+      - name: Compilar
+        run: bash tools/build-game.sh blackops2
+
+      - name: Subir el zip para la SD
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackops2-wiiu-card
+          path: out/blackops2-card.zip
+          compression-level: 0
+          retention-days: 7
