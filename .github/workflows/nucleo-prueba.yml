@@ -111,7 +111,7 @@ jobs:
               ls -la bin/cemu_core.nro
               if [ -n "$ADDRS" ]; then
                 echo "== TRADUCCION DE DIRECCIONES"
-                ELF=$(find build_switch -name "*.elf" -size +20M | head -1)
+                ELF=$(find bin build_switch -type f -size +50M ! -name "*.nro" ! -name "*.a" ! -name "*.o" | head -1); ls -la bin | head
                 echo "elf: $ELF"
                 A2L=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-addr2line
                 OD=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-objdump
