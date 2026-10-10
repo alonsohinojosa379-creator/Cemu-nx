@@ -59,6 +59,40 @@ namespace
 		std::fclose(file);
 	}
 
+	constexpr const char* kLastAbortPath = "sdmc:/switch/cemu/last-abort.log";
+
+	// Runs when a C++ exception goes uncaught (e.g. in a worker thread) and
+	// std::terminate() would otherwise end the process with a silent svcBreak.
+	// Writes the exception text straight to the SD card before aborting.
+	[[noreturn]] void SwitchTerminateHandler()
+	{
+		char detail[512] = "terminate() without an active C++ exception (abort/assert)";
+		if (const std::exception_ptr active = std::current_exception())
+		{
+			try
+			{
+				std::rethrow_exception(active);
+			}
+			catch (const std::exception& exception)
+			{
+				std::snprintf(detail, sizeof(detail), "std::exception: %s", exception.what());
+			}
+			catch (...)
+			{
+				std::snprintf(detail, sizeof(detail), "uncaught exception of unknown (non-std) type");
+			}
+		}
+		if (FILE* file = std::fopen(kLastAbortPath, "w"))
+		{
+			std::fprintf(file, "detail=%s\n", detail);
+			std::fprintf(file, "guest_backing=%s\n", MemMapper::DescribeGuestBacking());
+			std::fclose(file);
+		}
+		cemuLog_log(LogType::Force, "Switch: terminate called: {}", detail);
+		cemuLog_waitForFlush();
+		std::abort();
+	}
+
 	bool RecoverGuestPoolFromApplicationHeap(char* overrideBase, size_t overrideSize)
 	{
 		u64 heapRegionAddress = 0;
@@ -293,6 +327,7 @@ static void ReturnToLauncher()
 
 int main(int argc, char* argv[])
 {
+	std::set_terminate(SwitchTerminateHandler);
 	const bool platformInitialized = SwitchPlatformInit();
 	if (!platformInitialized)
 	{
