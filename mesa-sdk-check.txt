@@ -1,0 +1,35 @@
+== imagen: PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+== libnvk / libvulkan / EGL / GL en /opt/devkitpro/portlibs/switch/lib
+-rw-r--r-- 1 root root 42539084 Oct  1 10:23 libEGL.a
+-rw-r--r-- 1 root root   578884 Oct  1 10:23 libGL.a
+-rw-r--r-- 1 root root   400044 Oct  1 10:23 libglad.a
+-rw-r--r-- 1 root root  1912644 Oct  1 10:23 libglapi.a
+-rw-r--r-- 1 root root    63860 Oct  1 10:23 libGLESv1_CM.a
+-rw-r--r-- 1 root root   161126 Oct  1 10:23 libGLESv2.a
+-rw-r--r-- 1 root root   240202 Oct  1 10:23 libglfw3.a
+-rw-r--r-- 1 root root   136808 Oct  1 10:23 libnouveau_horizon.a
+-rw-r--r-- 1 root root  2151044 Oct  1 10:23 libnouveau_mme.a
+-rw-r--r-- 1 root root  2061474 Oct  1 10:23 libnouveau_ws.a
+-rw-r--r-- 1 root root  5732402 Oct  1 10:23 libnvk.a
+-rw-r--r-- 1 root root 89519232 Oct  1 10:23 libvulkan.a
+-rw-r--r-- 1 root root  1084232 Oct  1 10:23 libvulkan_util.a
+== libnvk.a en cualquier parte
+/opt/devkitpro/portlibs/switch/lib/libnvk.a
+== share/mesa-switch
+(no existe share/mesa-switch)
+== revision
+(no hay archivo revision)
+== cmake/pkgconfig de Vulkan y OpenGL
+/opt/devkitpro/portlibs/switch/lib/cmake/OpenGL:
+OpenGLConfig.cmake
+
+/opt/devkitpro/portlibs/switch/lib/cmake/Vulkan:
+VulkanConfig.cmake
+egl.pc
+glapi.pc
+glesv1_cm.pc
+glesv2.pc
+glfw3.pc
+gl.pc
+libglad.pc
+vulkan.pc
