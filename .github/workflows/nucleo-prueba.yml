@@ -70,6 +70,11 @@ jobs:
               ls -la $P/lib/libelf.a $P/lib/libdrm_nouveau.a $P/lib/libntfs-3g.a $P/lib/libSDL2.a $P/lib/libavcodec.a 2>&1 || true
               # Si pkg.devkitpro.org no responde (403 desde GitHub), seguimos con lo que haya.
               if [ -n "$MISSING" ]; then "$PM" -Sy --needed --noconfirm $MISSING || echo "== pacman fallo; sigo con lo que trae la imagen"; fi
+              echo "== servidor de paquetes de devkitPro"
+              curl -sSI -m 30 https://pkg.devkitpro.org/packages/dkp-libs.db 2>&1 | head -8 || true
+              curl -sSI -m 30 -A "Mozilla/5.0" https://pkg.devkitpro.org/packages/dkp-libs.db 2>&1 | head -4 || true
+              echo "== funciones de libelf que pide el driver (nm -u)"
+              $DEVKITPRO/devkitA64/bin/aarch64-none-elf-nm -u $P/lib/libnvk.a 2>/dev/null | grep -E "elf_|gelf_|elf32_|elf64_" | sort -u | head -40 || true
               echo "== de nuevo, tras pacman"
               ls -la $P/lib/libelf.a $P/lib/libdrm_nouveau.a $P/lib/libntfs-3g.a 2>&1 || true
               echo "== SDK de Mesa"
@@ -101,7 +106,7 @@ jobs:
           git init -q
           git config user.name build; git config user.email build@localhost
           git checkout -q --orphan resultado-nucleo
-          { echo "estado: ${{ steps.compilar.outcome }}"; echo "ref: ${{ inputs.ref || 'main' }}"; echo; tail -n 250 "$GITHUB_WORKSPACE/build.log" 2>/dev/null; } > resultado.txt
+          { echo "estado: ${{ steps.compilar.outcome }}"; echo "ref: ${{ inputs.ref || 'main' }}"; echo; grep -v -E "^\(Reading database|^Get:|^Preparing|^Unpacking|^Setting up|^-- (Looking|Performing)" "$GITHUB_WORKSPACE/build.log" 2>/dev/null | tail -n 300; } > resultado.txt
           git add resultado.txt
           git commit -qm "Resultado de la compilacion del nucleo"
           git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" resultado-nucleo
