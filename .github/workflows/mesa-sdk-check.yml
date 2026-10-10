@@ -9,6 +9,9 @@ on:
     paths: [.github/workflows/mesa-sdk-check.yml]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -47,3 +50,16 @@ jobs:
         with:
           name: mesa-sdk-check
           path: mesa-sdk-check.txt
+
+      - name: Guardar el resultado en la rama resultado-mesa
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "build"
+          git config user.email "build@localhost"
+          cp mesa-sdk-check.txt /tmp/mesa-sdk-check.txt
+          git checkout --orphan resultado-mesa
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/mesa-sdk-check.txt mesa-sdk-check.txt
+          git add mesa-sdk-check.txt
+          git commit -m "Resultado de la revision del SDK de Mesa"
+          git push --force origin resultado-mesa
