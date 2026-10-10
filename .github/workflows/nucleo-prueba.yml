@@ -1,0 +1,101 @@
+name: Compilar nucleo de Cemu (prueba)
+
+# Compila SOLO el nucleo (bin/cemu_core.nro) dentro de la imagen
+# ghcr.io/autorunhq/switch-dev, que ya trae el SDK de Mesa/NVK de la Switch.
+# Por defecto compila la rama main sin cambios (prueba de que el entorno sirve).
+# El resultado se publica como pre-release "nucleo-prueba" y el final del
+# registro de compilacion se guarda en la rama resultado-nucleo.
+on:
+  push:
+    branches: [diagnostico-abort]
+    paths: [.github/workflows/nucleo-prueba.yml]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Rama o commit a compilar"
+        default: "main"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    steps:
+      - name: Liberar espacio en disco
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af >/dev/null || true
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+          fetch-depth: 1
+
+      - name: Bajar la imagen switch-dev
+        run: |
+          for tag in 2026.10.01 2026.09.28.4; do
+            if docker pull "ghcr.io/autorunhq/switch-dev:$tag"; then
+              echo "IMG=ghcr.io/autorunhq/switch-dev:$tag" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          grep -q '^IMG=' "$GITHUB_ENV"
+
+      - name: Compilar el nucleo
+        id: compilar
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD:/work" -w /work \
+            -e BUILD_JOBS=3 -e RELEASE_VERSION=1.2.0 \
+            -e SWITCH_MESA_SDK_ROOT=/opt/devkitpro/portlibs/switch \
+            "$IMG" bash -ec '
+              export DEVKITPRO=/opt/devkitpro
+              export PATH=/usr/bin:$DEVKITPRO/tools/bin:$DEVKITPRO/devkitA64/bin:$PATH
+              git config --global --add safe.directory "*"
+              apt-get update
+              apt-get install -y --no-install-recommends cmake ninja-build g++ git curl make python3 ca-certificates bzip2 patch xz-utils
+              PM=$(command -v dkp-pacman || command -v pacman || echo "$DEVKITPRO/pacman/bin/pacman")
+              echo "== pacman: $PM"
+              # No tocamos switch-mesa: el SDK de Mesa de la imagen ya esta en portlibs.
+              MISSING=""
+              for p in devkitA64 libnx switch-tools switch-cmake switch-pkg-config switch-zlib switch-libzstd switch-libpng switch-freetype switch-mbedtls switch-curl switch-ffmpeg switch-dav1d switch-libelf switch-libdrm_nouveau switch-sdl2 switch-sdl2_image switch-sdl2_ttf switch-libjpeg-turbo switch-ntfs-3g; do
+                "$PM" -Qq "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
+              done
+              echo "== paquetes que faltan:$MISSING"
+              if [ -n "$MISSING" ]; then "$PM" -S --needed --noconfirm $MISSING; fi
+              echo "== SDK de Mesa"
+              ls -la "$SWITCH_MESA_SDK_ROOT/lib/libnvk.a" "$SWITCH_MESA_SDK_ROOT/lib/libvulkan.a"
+              sed -n "s/^Version:[[:space:]]*//p" "$SWITCH_MESA_SDK_ROOT/lib/pkgconfig/vulkan.pc" | head -1
+              bash dist/switch/setup_dependencies.sh --skip-system-packages --skip-nvk
+              bash dist/switch/build.sh
+              ls -la bin/cemu_core.nro
+            ' 2>&1 | tee build.log
+
+      - name: Publicar el nucleo compilado
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo chown -R "$USER" bin build.log 2>/dev/null || true
+          sha256sum bin/cemu_core.nro | tee cemu_core.sha256
+          gh release delete nucleo-prueba --yes --cleanup-tag 2>/dev/null || true
+          gh release create nucleo-prueba bin/cemu_core.nro cemu_core.sha256 \
+            --prerelease --title "Nucleo de prueba" \
+            --notes "Compilado desde ${{ inputs.ref || 'main' }} (${{ github.sha }})."
+
+      - name: Guardar el resultado en la rama resultado-nucleo
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir /tmp/res && cd /tmp/res
+          git init -q
+          git config user.name build; git config user.email build@localhost
+          git checkout -q --orphan resultado-nucleo
+          { echo "estado: ${{ steps.compilar.outcome }}"; echo "ref: ${{ inputs.ref || 'main' }}"; echo; tail -n 250 "$GITHUB_WORKSPACE/build.log" 2>/dev/null; } > resultado.txt
+          git add resultado.txt
+          git commit -qm "Resultado de la compilacion del nucleo"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" resultado-nucleo
