@@ -234,6 +234,22 @@ bool SwitchCreateRenderer(int width, int height, std::string_view backend)
 	}
 }
 
+// Title relaunch (e.g. Black Ops II campaign -> Zombies): the renderer imports the emulated
+// memory, so it has to be rebuilt after the memory space has been recreated.
+bool SwitchHasRenderer()
+{
+	return g_renderer != nullptr;
+}
+
+void SwitchReleaseRenderer()
+{
+#if defined(ENABLE_OPENGL)
+	if (s_openGLCanvas)
+		return; // the OpenGL path copies guest data and keeps its canvas
+#endif
+	g_renderer.reset();
+}
+
 void SwitchRendererThreadExit()
 {
 #if defined(ENABLE_OPENGL)

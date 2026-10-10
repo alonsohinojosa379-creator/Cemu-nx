@@ -1076,6 +1076,15 @@ namespace CafeSystem
         fsc_unmount("/internal/code/", FSC_PRIORITY_BASE);
 	}
 
+	static bool s_shutdownForRelaunch = false;
+
+	void ShutdownTitleForRelaunch()
+	{
+		s_shutdownForRelaunch = true;
+		ShutdownTitle();
+		s_shutdownForRelaunch = false;
+	}
+
 	void ShutdownTitle()
 	{
 		if(!sSystemRunning)
@@ -1098,6 +1107,9 @@ namespace CafeSystem
 		UnmountExtras();
 		MlcStorageUnmountAllTitles();
 		UnmountBaseDirectories();
+		// the renderer may hold the old emulated memory (host memory import), release it before the memory goes away
+		if (s_shutdownForRelaunch && s_implementation)
+			s_implementation->CafeReleaseRenderer();
 		DestroyMemorySpace();
 		LaunchSettings::ClearCosArgstr();
 		sSystemRunning = false;
@@ -1198,13 +1210,15 @@ namespace CafeSystem
 
 	void RequestRecreateCanvas()
 	{
-		s_implementation->CafeRecreateCanvas();
+		if (s_implementation)
+			s_implementation->CafeRecreateCanvas();
 	}
 
 	void NotifyPPCProcessExit(sint32 status)
 	{
 		s_foregroundReturnStatus = status;
-		s_implementation->CafePPCProcessExit();
+		if (s_implementation)
+			s_implementation->CafePPCProcessExit();
 	}
 
 	std::optional<sint32> GetForegroundTitleReturnStatus()

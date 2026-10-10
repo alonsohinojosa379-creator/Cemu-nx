@@ -13,6 +13,8 @@ namespace CafeSystem
 	public:
 		virtual void CafeRecreateCanvas() = 0;
 		virtual void CafePPCProcessExit() = 0; // emulated process exited
+		// called while a title is being replaced by another one (title relaunch), before the emulated memory is unmapped
+		virtual void CafeReleaseRenderer() {}
 	};
 
 	enum class PREPARE_STATUS_CODE
@@ -47,6 +49,7 @@ namespace CafeSystem
 	std::optional<sint32> GetForegroundTitleReturnStatus(); // valid once the foreground title exited gracefully via coreinit exit
 
 	void ShutdownTitle();
+	void ShutdownTitleForRelaunch();
 
 	std::string GetMlcStoragePath(TitleId titleId);
 	void MlcStorageMountAllTitles();

@@ -52,6 +52,8 @@
 void PPCTimer_init();
 bool SwitchCreateRenderer(int width, int height, std::string_view backend);
 void SwitchDestroyRenderer();
+bool SwitchHasRenderer();
+void SwitchReleaseRenderer();
 
 namespace
 {
@@ -69,6 +71,31 @@ namespace
 	std::string s_rendererBackend{"vk"};
 
 	constexpr uint64_t kGameBootBoostHandoffTimeoutNs = 300'000'000'000ULL;
+
+	// Connects the Cafe OS layer to the Switch window: without this the emulated title can
+	// neither relaunch itself (Black Ops II Zombies) nor exit cleanly.
+	class SwitchSystemImplementation final : public CafeSystem::SystemImplementation
+	{
+	public:
+		void CafeRecreateCanvas() override
+		{
+			if (SwitchHasRenderer())
+				return;
+			if (!SwitchCreateRenderer(s_surfaceWidth.load(std::memory_order_acquire),
+			                          s_surfaceHeight.load(std::memory_order_acquire),
+			                          s_rendererBackend))
+				cemuLog_log(LogType::Force, "Switch: failed to recreate the renderer after relaunching the title");
+		}
+		void CafePPCProcessExit() override
+		{
+			s_exitRequested.store(true, std::memory_order_release);
+		}
+		void CafeReleaseRenderer() override
+		{
+			SwitchReleaseRenderer();
+		}
+	};
+	SwitchSystemImplementation s_systemImplementation;
 
 	void RestoreNormalCpuBoostMode()
 	{
@@ -516,6 +543,7 @@ namespace WindowSystem
 		SwitchInput_Setup();
 
 		CafeSystem::Initialize();
+		CafeSystem::SetImplementation(&s_systemImplementation);
 		s_cafeInitialized = true;
 
 		CafeTitleList::Initialize(ActiveSettings::GetUserDataPath("title_list_cache.xml"));

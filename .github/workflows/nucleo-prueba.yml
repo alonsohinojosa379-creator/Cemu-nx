@@ -14,6 +14,9 @@ on:
       ref:
         description: "Rama o commit a compilar"
         default: "main"
+      tag:
+        description: "Nombre del pre-release donde se publica"
+        default: "nucleo-prueba"
       addrs:
         description: "Direcciones (hex, sin base) a traducir con addr2line; si se usa, no se publica nada"
         default: ""
@@ -145,9 +148,9 @@ jobs:
         run: |
           sudo chown -R "$USER" bin build.log 2>/dev/null || true
           sha256sum bin/cemu_core.nro | tee cemu_core.sha256
-          gh release delete nucleo-prueba --yes --cleanup-tag 2>/dev/null || true
+          gh release delete "${{ inputs.tag || 'nucleo-prueba' }}" --yes --cleanup-tag 2>/dev/null || true
           EXTRA=""; [ -f switch_launcher/cemu.nro ] && EXTRA="switch_launcher/cemu.nro"
-          gh release create nucleo-prueba bin/cemu_core.nro cemu_core.sha256 $EXTRA \
+          gh release create "${{ inputs.tag || 'nucleo-prueba' }}" bin/cemu_core.nro cemu_core.sha256 $EXTRA \
             --prerelease --title "Nucleo de prueba" \
             --notes "Compilado desde ${{ inputs.ref || 'main' }} (${{ github.sha }})."
 

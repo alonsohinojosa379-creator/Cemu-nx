@@ -697,7 +697,7 @@ namespace coreinit
 
 	void OSLauncherThread(uint64 titleId)
 	{
-		CafeSystem::ShutdownTitle();
+		CafeSystem::ShutdownTitleForRelaunch();
 		CafeSystem::PrepareForegroundTitle(titleId);
 		CafeSystem::RequestRecreateCanvas();
 		CafeSystem::LaunchForegroundTitle();
