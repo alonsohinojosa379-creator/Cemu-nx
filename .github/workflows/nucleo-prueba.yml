@@ -101,8 +101,14 @@ jobs:
                 fi
               done
               bash dist/switch/setup_dependencies.sh --skip-system-packages --skip-nvk
+              echo "== Mesa para el lanzador (necesita 20.1.0)"
+              grep -H '^Version' $P/lib/pkgconfig/glesv2.pc $P/lib/pkgconfig/egl.pc 2>&1 || true
+              ls /var/cache/pacman/pkg 2>/dev/null | grep -i mesa || echo "sin paquete switch-mesa en cache"
               bash dist/switch/build.sh
               ls -la bin/cemu_core.nro
+              echo "== lanzador completo"
+              (RELEASE_VERSION=1.2.0 BUILD_JOBS=3 bash build_switch_all.sh) || echo "== EL LANZADOR FALLO"
+              ls -la switch_launcher/cemu.nro 2>&1 || true
             ' 2>&1 | tee build.log
 
       - name: Publicar el nucleo compilado
@@ -113,7 +119,8 @@ jobs:
           sudo chown -R "$USER" bin build.log 2>/dev/null || true
           sha256sum bin/cemu_core.nro | tee cemu_core.sha256
           gh release delete nucleo-prueba --yes --cleanup-tag 2>/dev/null || true
-          gh release create nucleo-prueba bin/cemu_core.nro cemu_core.sha256 \
+          EXTRA=""; [ -f switch_launcher/cemu.nro ] && EXTRA="switch_launcher/cemu.nro"
+          gh release create nucleo-prueba bin/cemu_core.nro cemu_core.sha256 $EXTRA \
             --prerelease --title "Nucleo de prueba" \
             --notes "Compilado desde ${{ inputs.ref || 'main' }} (${{ github.sha }})."
 
