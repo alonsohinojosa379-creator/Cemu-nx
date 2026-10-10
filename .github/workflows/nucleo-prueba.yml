@@ -107,7 +107,17 @@ jobs:
               bash dist/switch/build.sh
               ls -la bin/cemu_core.nro
               echo "== lanzador completo"
-              (RELEASE_VERSION=1.2.0 BUILD_JOBS=3 bash build_switch_all.sh) || echo "== EL LANZADOR FALLO"
+              echo "== libGLESv2/libEGL de la imagen"
+              ls -la $P/lib/libGLESv2.a $P/lib/libEGL.a $P/lib/libglapi.a 2>&1 || true
+              grep -H '^Version' $P/lib/pkgconfig/glesv2.pc $P/lib/pkgconfig/egl.pc 2>&1 || true
+              if (RELEASE_VERSION=1.2.0 BUILD_JOBS=3 bash build_switch_all.sh); then :; else
+                echo "== build_switch_all fallo; pruebo el lanzador con el Mesa de la imagen"
+                mkdir -p switch_launcher/romfs/emu
+                cp -f bin/cemu_core.nro switch_launcher/romfs/emu/cemu_core.nro
+                sha256sum bin/cemu_core.nro | awk "{print \$1}" > switch_launcher/romfs/emu/cemu_core.sha256
+                (make -C switch_launcher/fwd VERSION=1.2.0 clean && make -j3 -C switch_launcher/fwd VERSION=1.2.0) || true
+                (cd switch_launcher && make LAUNCHER_MESA20_ROOT=$P RELEASE_VERSION=1.2.0 APP_VERSION=1.2.0 clean && make -j3 LAUNCHER_MESA20_ROOT=$P RELEASE_VERSION=1.2.0 APP_VERSION=1.2.0) || echo "== EL LANZADOR FALLO"
+              fi
               ls -la switch_launcher/cemu.nro 2>&1 || true
             ' 2>&1 | tee build.log
 
