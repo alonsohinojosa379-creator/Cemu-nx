@@ -65,7 +65,13 @@ jobs:
                 "$PM" -Qq "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
               done
               echo "== paquetes que faltan:$MISSING"
-              if [ -n "$MISSING" ]; then "$PM" -Sy --needed --noconfirm $MISSING; fi
+              P=$DEVKITPRO/portlibs/switch
+              echo "== librerias clave que ya trae la imagen"
+              ls -la $P/lib/libelf.a $P/lib/libdrm_nouveau.a $P/lib/libntfs-3g.a $P/lib/libSDL2.a $P/lib/libavcodec.a 2>&1 || true
+              # Si pkg.devkitpro.org no responde (403 desde GitHub), seguimos con lo que haya.
+              if [ -n "$MISSING" ]; then "$PM" -Sy --needed --noconfirm $MISSING || echo "== pacman fallo; sigo con lo que trae la imagen"; fi
+              echo "== de nuevo, tras pacman"
+              ls -la $P/lib/libelf.a $P/lib/libdrm_nouveau.a $P/lib/libntfs-3g.a 2>&1 || true
               echo "== SDK de Mesa"
               ls -la "$SWITCH_MESA_SDK_ROOT/lib/libnvk.a" "$SWITCH_MESA_SDK_ROOT/lib/libvulkan.a"
               sed -n "s/^Version:[[:space:]]*//p" "$SWITCH_MESA_SDK_ROOT/lib/pkgconfig/vulkan.pc" | head -1
