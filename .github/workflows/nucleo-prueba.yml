@@ -80,6 +80,26 @@ jobs:
               echo "== SDK de Mesa"
               ls -la "$SWITCH_MESA_SDK_ROOT/lib/libnvk.a" "$SWITCH_MESA_SDK_ROOT/lib/libvulkan.a"
               sed -n "s/^Version:[[:space:]]*//p" "$SWITCH_MESA_SDK_ROOT/lib/pkgconfig/vulkan.pc" | head -1
+              NM=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-nm
+              AR=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-ar
+              CC=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-gcc
+              echo "== simbolos sin resolver de libelf / libdrm_nouveau en el SDK"
+              for a in $P/lib/libnvk.a $P/lib/libvulkan.a $SWITCH_MESA_SDK_ROOT/libnvk_local.a; do
+                [ -f "$a" ] || continue
+                echo "-- $a"
+                $NM -u "$a" 2>/dev/null | grep -E "^ +U (elf|gelf)[0-9_a-z]*" | sort -u | head -30 || true
+                $NM -u "$a" 2>/dev/null | grep -E "^ +U (nouveau|drm)[A-Za-z0-9_]*" | sort -u | head -30 || true
+              done
+              # Si la imagen no trae estas librerias, ponemos archivos vacios para que CMake pase;
+              # si el enlace de verdad necesita simbolos, fallara y lo veremos en el log.
+              for l in libelf libdrm_nouveau; do
+                if [ ! -f "$P/lib/$l.a" ]; then
+                  echo "== creando $l.a vacia (stub)"
+                  echo "int __stub_$l;" > /tmp/stub_$l.c
+                  $CC -c /tmp/stub_$l.c -o /tmp/stub_$l.o
+                  $AR rcs "$P/lib/$l.a" /tmp/stub_$l.o
+                fi
+              done
               bash dist/switch/setup_dependencies.sh --skip-system-packages --skip-nvk
               bash dist/switch/build.sh
               ls -la bin/cemu_core.nro
