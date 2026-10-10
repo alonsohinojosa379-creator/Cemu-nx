@@ -1,0 +1,49 @@
+name: Revisar SDK de Mesa (imagen switch-dev)
+
+# Solo mira que trae la imagen ghcr.io/autorunhq/switch-dev (la misma que usan
+# los workflows de Autorun): busca libnvk.a y el archivo de revision que pide
+# Cemu-nx. No compila nada y tarda pocos minutos.
+on:
+  push:
+    branches: [diagnostico-abort]
+    paths: [.github/workflows/mesa-sdk-check.yml]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Bajar la imagen
+        run: |
+          for tag in 2026.10.01 2026.09.28.4; do
+            if docker pull "ghcr.io/autorunhq/switch-dev:$tag"; then
+              echo "IMG=ghcr.io/autorunhq/switch-dev:$tag" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          grep -q '^IMG=' "$GITHUB_ENV" || { echo "No se pudo bajar la imagen"; exit 1; }
+
+      - name: Buscar el SDK de Mesa dentro de la imagen
+        run: |
+          docker run --rm "$IMG" sh -c '
+            P=/opt/devkitpro/portlibs/switch
+            echo "== imagen: $(cat /etc/os-release 2>/dev/null | head -1)"
+            echo "== libnvk / libvulkan / EGL / GL en $P/lib"
+            ls -la $P/lib 2>/dev/null | grep -i -E "nvk|vulkan|libEGL|libGL|glapi|nouveau|zink" || echo "(nada)"
+            echo "== libnvk.a en cualquier parte"
+            find / -name "libnvk*" 2>/dev/null || true
+            echo "== share/mesa-switch"
+            ls -la $P/share/mesa-switch 2>/dev/null || echo "(no existe share/mesa-switch)"
+            echo "== revision"
+            cat $P/share/mesa-switch/revision 2>/dev/null || echo "(no hay archivo revision)"
+            echo "== cmake/pkgconfig de Vulkan y OpenGL"
+            ls $P/lib/cmake/Vulkan $P/lib/cmake/OpenGL 2>&1 | head
+            ls $P/lib/pkgconfig 2>/dev/null | grep -i -E "vulkan|egl|gl|glapi" || true
+          ' | tee mesa-sdk-check.txt
+          cat mesa-sdk-check.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mesa-sdk-check
+          path: mesa-sdk-check.txt
