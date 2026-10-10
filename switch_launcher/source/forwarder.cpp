@@ -656,9 +656,13 @@ bool patch_npdm(std::vector<u8> &npdm, u64 tid)
     return true;
 }
 
+// libnx nuevo guarda los idiomas en nacp.lang_data.lang; el viejo en nacp.lang.
+template <class T> auto nacp_langs(T &n, int) -> decltype((n.lang_data.lang)) { return n.lang_data.lang; }
+template <class T> auto nacp_langs(T &n, long) -> decltype((n.lang)) { return n.lang; }
+
 void patch_nacp(NacpStruct &nacp, const std::string &name, const std::string &author, u64 tid)
 {
-    for (auto &lang : nacp.lang) {
+    for (auto &lang : nacp_langs(nacp, 0)) {
         if (!name.empty()) {
             std::memset(lang.name, 0, sizeof(lang.name));
             std::strncpy(lang.name, name.c_str(), sizeof(lang.name) - 1);
