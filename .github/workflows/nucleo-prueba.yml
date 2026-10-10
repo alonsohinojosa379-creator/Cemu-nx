@@ -65,7 +65,7 @@ jobs:
                 "$PM" -Qq "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
               done
               echo "== paquetes que faltan:$MISSING"
-              if [ -n "$MISSING" ]; then "$PM" -S --needed --noconfirm $MISSING; fi
+              if [ -n "$MISSING" ]; then "$PM" -Sy --needed --noconfirm $MISSING; fi
               echo "== SDK de Mesa"
               ls -la "$SWITCH_MESA_SDK_ROOT/lib/libnvk.a" "$SWITCH_MESA_SDK_ROOT/lib/libvulkan.a"
               sed -n "s/^Version:[[:space:]]*//p" "$SWITCH_MESA_SDK_ROOT/lib/pkgconfig/vulkan.pc" | head -1
