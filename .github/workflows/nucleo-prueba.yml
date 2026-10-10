@@ -14,6 +14,9 @@ on:
       ref:
         description: "Rama o commit a compilar"
         default: "main"
+      addrs:
+        description: "Direcciones (hex, sin base) a traducir con addr2line; si se usa, no se publica nada"
+        default: ""
 
 permissions:
   contents: write
@@ -49,7 +52,7 @@ jobs:
         run: |
           set -o pipefail
           docker run --rm -v "$PWD:/work" -w /work \
-            -e BUILD_JOBS=3 -e RELEASE_VERSION=1.2.0 \
+            -e BUILD_JOBS=3 -e RELEASE_VERSION=1.2.0 -e ADDRS="${{ inputs.addrs }}" \
             -e SWITCH_MESA_SDK_ROOT=/opt/devkitpro/portlibs/switch \
             "$IMG" bash -ec '
               export DEVKITPRO=/opt/devkitpro
@@ -106,6 +109,20 @@ jobs:
               ls /var/cache/pacman/pkg 2>/dev/null | grep -i mesa || echo "sin paquete switch-mesa en cache"
               bash dist/switch/build.sh
               ls -la bin/cemu_core.nro
+              if [ -n "$ADDRS" ]; then
+                echo "== TRADUCCION DE DIRECCIONES"
+                ELF=$(find build_switch -name "*.elf" -size +20M | head -1)
+                echo "elf: $ELF"
+                A2L=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-addr2line
+                OD=$DEVKITPRO/devkitA64/bin/aarch64-none-elf-objdump
+                for a in $ADDRS; do echo "-- 0x$a"; $A2L -f -C -i -e "$ELF" 0x$a; done
+                echo "== ensamblador alrededor"
+                for a in $ADDRS; do
+                  lo=$(printf "0x%x" $((0x$a - 0x30))); hi=$(printf "0x%x" $((0x$a + 0x10)))
+                  $OD -d -C --start-address=$lo --stop-address=$hi "$ELF" | tail -n 22
+                done
+                exit 0
+              fi
               echo "== lanzador completo"
               echo "== libGLESv2/libEGL de la imagen"
               ls -la $P/lib/libGLESv2.a $P/lib/libEGL.a $P/lib/libglapi.a 2>&1 || true
@@ -122,7 +139,7 @@ jobs:
             ' 2>&1 | tee build.log
 
       - name: Publicar el nucleo compilado
-        if: success()
+        if: success() && inputs.addrs == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
