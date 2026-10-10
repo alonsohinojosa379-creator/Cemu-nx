@@ -7,6 +7,9 @@
 #include "config/LaunchSettings.h"
 #include "util/helpers/ThreadHelpers.h"
 #include <pugixml.hpp>
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchPlatform.h"
+#endif
 
 namespace coreinit
 {
@@ -697,6 +700,11 @@ namespace coreinit
 
 	void OSLauncherThread(uint64 titleId)
 	{
+#if defined(__SWITCH__)
+		// restart the whole core instead of recycling GPU/memory/recompiler state in this process
+		if (SwitchPlatform_RequestCoreRestart(titleId))
+			return;
+#endif
 		CafeSystem::ShutdownTitleForRelaunch();
 		CafeSystem::PrepareForegroundTitle(titleId);
 		CafeSystem::RequestRecreateCanvas();

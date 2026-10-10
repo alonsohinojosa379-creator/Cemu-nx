@@ -18,6 +18,10 @@ void SwitchPlatform_NotifyGameFrameSubmitted();
 void SwitchPlatform_PollGameBootState();
 void SwitchPlatform_ApplyWindowSurfaceSize(int width, int height);
 bool SwitchPlatform_ShouldReturnToLauncher();
+// Title relaunch (e.g. Black Ops II campaign -> Zombies): restarting the whole core is much more
+// robust than recycling the GPU, memory and recompiler state inside the running process.
+bool SwitchPlatform_RequestCoreRestart(uint64_t titleId);
+bool SwitchPlatform_ShouldRestartCore();
 void SwitchPlatform_SetGamePadLayout(SwitchGamePadLayout layout);
 SwitchGamePadLayout SwitchPlatform_GetGamePadLayout();
 void SwitchPlatform_CycleGamePadMode();

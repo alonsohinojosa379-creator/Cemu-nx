@@ -65,6 +65,7 @@ namespace
 	std::atomic_int s_surfaceHeight{720};
 	std::atomic_bool s_exitRequested{false};
 	std::atomic_bool s_returnToLauncher{true};
+	std::atomic_bool s_restartCore{false};
 	std::atomic<SwitchGamePadLayout> s_gamePadLayout{SwitchGamePadLayout::Disabled};
 	std::atomic<SwitchGamePadLayout> s_lastCompositeLayout{SwitchGamePadLayout::Right};
 	std::atomic_bool s_gamePadLayoutChanged{false};
@@ -124,6 +125,11 @@ void SwitchPlatform_ApplyWindowSurfaceSize(int width, int height)
 bool SwitchPlatform_ShouldReturnToLauncher()
 {
 	return s_returnToLauncher.load(std::memory_order_acquire);
+}
+
+bool SwitchPlatform_ShouldRestartCore()
+{
+	return s_restartCore.load(std::memory_order_acquire);
 }
 
 bool SwitchPlatform_UseTripleBuffer()
@@ -456,6 +462,32 @@ namespace WindowSystem
 	{
 		auto it = s_handoff.find(key);
 		return it != s_handoff.end() ? it->second : def;
+	}
+
+	// After a title relaunch request the core restarts itself; the arguments the emulated
+	// title passed (e.g. which Black Ops II mode to load) travel through this small file.
+	static void LoadRelaunchArgs()
+	{
+		const fs::path path = ActiveSettings::GetUserDataPath("relaunch_args.txt");
+		std::ifstream in(path);
+		if (!in.is_open())
+			return;
+		std::vector<std::string> args;
+		std::string line;
+		while (std::getline(in, line))
+		{
+			while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+				line.pop_back();
+			args.push_back(line);
+		}
+		in.close();
+		std::error_code ec;
+		fs::remove(path, ec);
+		if (!args.empty())
+		{
+			cemuLog_log(LogType::Force, "Switch: restarted for a title relaunch, {} argument(s)", args.size());
+			CafeSystem::SetOverrideArgs(args);
+		}
 	}
 
 	static void CommonInit()
@@ -813,6 +845,7 @@ namespace WindowSystem
 			SetupWindowInfo();
 			SwitchPlatform_BeginGameBootBoost();
 			CommonInit();
+			LoadRelaunchArgs();
 			if (!BootTitle())
 				throw std::runtime_error("no launchable title was found");
 			RunLoop();
@@ -853,3 +886,41 @@ namespace WindowSystem
 	void UpdateWindowTitles(bool, bool, double) {}
 	void CaptureInput(const ControllerState&, const ControllerState&) {}
 } // namespace WindowSystem
+
+bool SwitchPlatform_RequestCoreRestart(uint64_t titleId)
+{
+	// Only the same title can be restarted this way (Black Ops II modes share one title id).
+	if (!CafeSystem::IsTitleRunning() || CafeSystem::GetForegroundTitleId() != titleId)
+		return false;
+	std::vector<std::string> args;
+	CafeSystem::GetOverrideArgStr(args);
+	try
+	{
+		// the launcher hands its settings over once and the core consumes them, write them back
+		{
+			std::ofstream out(ActiveSettings::GetUserDataPath("switch.ini"), std::ios::trunc);
+			if (!out.is_open())
+				return false;
+			for (const auto& [key, value] : WindowSystem::s_handoff)
+				out << key << '=' << value << '\n';
+			if (!out.good())
+				return false;
+		}
+		std::ofstream out(ActiveSettings::GetUserDataPath("relaunch_args.txt"), std::ios::trunc);
+		if (!out.is_open())
+			return false;
+		for (const auto& arg : args)
+			out << arg << '\n';
+		if (!out.good())
+			return false;
+	}
+	catch (...)
+	{
+		return false;
+	}
+	cemuLog_log(LogType::Force, "Switch: title relaunch requested, restarting the core");
+	s_restartCore.store(true, std::memory_order_release);
+	s_returnToLauncher.store(false, std::memory_order_release);
+	s_exitRequested.store(true, std::memory_order_release);
+	return true;
+}

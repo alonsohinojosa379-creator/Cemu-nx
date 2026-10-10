@@ -278,6 +278,7 @@ static void SwitchPlatformExit()
 // Matches EXIT_DETECTION_STR in switch_launcher/fwd/main.c.
 static constexpr const char* kForwarderExitSentinel = "__CEMU_FORWARDER_EXIT__";
 static constexpr const char* kLauncherPath = "sdmc:/switch/cemu/cemu.nro";
+static constexpr const char* kCorePath = "sdmc:/switch/cemu/.emu/cemu_core.nro";
 
 static std::string ForwarderLauncherPath()
 {
@@ -377,7 +378,16 @@ int main(int argc, char* argv[])
 		status = EXIT_FAILURE;
 	}
 
-	if (SwitchPlatform_ShouldReturnToLauncher())
+	if (SwitchPlatform_ShouldRestartCore())
+	{
+		cemuLog_log(LogType::Force, "Switch: chainloading the core again for the relaunched title");
+		cemuLog_waitForFlush();
+		if (envHasNextLoad())
+			envSetNextLoad(kCorePath, kCorePath);
+		else
+			ReturnToLauncher();
+	}
+	else if (SwitchPlatform_ShouldReturnToLauncher())
 		ReturnToLauncher();
 	SwitchPlatformExit();
 	std::_Exit(status);
