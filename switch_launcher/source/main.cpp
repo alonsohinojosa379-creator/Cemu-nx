@@ -7107,7 +7107,8 @@ static void forwarderWizard(Game &g) {
   const int nameY=panel.y+32, authY=panel.y+130, createY=panel.y+232;
   const int fieldH=82, createH=64;
   char name[256]; snprintf(name,sizeof(name),"%s",g.title.c_str());
-  char author[128]; snprintf(author,sizeof(author),"%s","naga");
+  char author[128]; snprintf(author,sizeof(author),"%s",
+                             g.titleId==BO2_TITLE_ID?"Hecho por Ascencion H.O - Base NaGaa95":"naga");
   char icon[300]={0};
   { struct stat st; std::string cp=existingCoverPath(g);
     if(stat(cp.c_str(),&st)==0) snprintf(icon,sizeof(icon),"%s",cp.c_str());
@@ -7143,6 +7144,36 @@ static void forwarderWizard(Game &g) {
     else modalMessageStatic("Shortcut failed", { std::string(err[0]?err:"Unknown error") });
     beginScreenFx();
   };
+  // Installs the Campaign, Zombies and Multiplayer shortcuts in one go, using the icons that ship
+  // inside the launcher (romfs:/bo2/<id>.png), so nothing has to be imported by hand.
+  auto installAllModes=[&](){
+    if(!confirmBox("Install all BO2 shortcuts?",{
+        "Creates Campaign, Zombies and Multiplayer shortcuts in the HOME Menu.",
+        "Existing shortcuts for these modes are replaced."})) { beginScreenFx(); return; }
+    appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
+    int installed=0; std::string failure;
+    const int total=(int)(sizeof(kLaunchModes)/sizeof(kLaunchModes[0]));
+    for(int i=0;i<total;i++){
+      clearUiBackground();
+      drawHeaderStatic("Creating HOME shortcut", g.title.c_str());
+      { const int waitW=std::min(940,SW-64),waitH=140;
+        glassPanel((SW-waitW)/2,(SH-waitH)/2,waitW,waitH); }
+      char progress[128]; snprintf(progress,sizeof(progress),"%s (%d/%d)",kLaunchModes[i].label,i+1,total);
+      drawStaticTextC(g_font, SW/2, SH/2, progress, COL_TXT);
+      SDL_RenderPresent(g_ren);
+      const std::string suffix=std::string(LAUNCH_MODE_SEPARATOR)+kLaunchModes[i].id;
+      const std::string shortcutName=g.title+" - "+kLaunchModes[i].label;
+      const std::string iconPath=std::string("romfs:/bo2/")+kLaunchModes[i].id+".png";
+      char err[256]={0};
+      if(forwarder_create(g.key+suffix,g.legacyKey.empty()?std::string():g.legacyKey+suffix,
+                          shortcutName,author,iconPath,err,sizeof(err))) installed++;
+      else { failure=std::string(kLaunchModes[i].label)+": "+(err[0]?err:"Unknown error"); break; }
+    }
+    appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
+    if(failure.empty()){ toastStatic("3 HOME shortcuts installed"); done=true; }
+    else modalMessageStatic("Shortcut failed",{ std::to_string(installed)+" installed before the error.", failure });
+    beginScreenFx();
+  };
   auto activate=[&](){
     if(sel==0){ char p[300]; if(pickIcon(g,p,sizeof(p))){ snprintf(icon,sizeof(icon),"%s",p); if(iconTex)SDL_DestroyTexture(iconTex); iconTex=loadScaledTexture(icon,isz,isz); } beginScreenFx(); }
     else if(sel==1) edit("Shortcut name", name, sizeof(name));
@@ -7174,6 +7205,9 @@ static void forwarderWizard(Game &g) {
         case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  sel=(sel==0)?1:(sel==3?1:sel+1); break;
         case BTN_CONFIRM: activate(); break;
         case BTN_CANCEL:  done=true; break;
+        case SDL_CONTROLLER_BUTTON_X:
+          if(modesAvailable) installAllModes();
+          break;
         case BTN_SETTINGS:
           if(modesAvailable){
             modeIdx=modeIdx+1>=(int)(sizeof(kLaunchModes)/sizeof(kLaunchModes[0]))?-1:modeIdx+1;
@@ -7205,8 +7239,9 @@ static void forwarderWizard(Game &g) {
     std::string modeHint=modeIdx>=0?std::string("Mode: ")+kLaunchModes[modeIdx].label:std::string("Mode: none");
     FootItem footer[]={{g_gA,LauncherLocalization::Translate(sel==3?"Create shortcut":"Edit").data(),FA_NONE},
                        {g_gB,LauncherLocalization::Translate("Back").data(),FA_NONE},
-                       {g_gX,modeHint.c_str(),FA_NONE}};
-    drawFooterHints(footer,modesAvailable?3:2,SH-26);
+                       {g_gX,modeHint.c_str(),FA_NONE},
+                       {g_gY,"Install all 3",FA_NONE}};
+    drawFooterHints(footer,modesAvailable?4:2,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextUiFrame();
   }
   if(iconTex) SDL_DestroyTexture(iconTex);
@@ -8089,6 +8124,22 @@ static void runAppletInstaller() {
   }
 }
 
+// True when L and R are held down right now (sampled for a moment, so a press that started while
+// the HOME Menu handed over to the launcher is still seen). Used to open the full launcher instead of
+// starting the game of a HOME shortcut.
+static bool holdingSettingsCombo() {
+  PadState pad;
+  padConfigureInput(1,HidNpadStyleSet_NpadStandard);
+  padInitializeDefault(&pad);
+  const u64 mask=HidNpadButton_L|HidNpadButton_R;
+  for(int i=0;i<6;i++){
+    padUpdate(&pad);
+    if((padGetButtons(&pad)&mask)==mask) return true;
+    svcSleepThread(30ull*1000ull*1000ull);
+  }
+  return false;
+}
+
 int main(int argc, char **argv){
   if(argc>=1 && argv[0] && argv[0][0]){
     g_forwarderSelfPath=argv[0];
@@ -8110,6 +8161,8 @@ int main(int argc, char **argv){
   const auto addressSpaceError=SwitchLaunch::AddressSpaceError(SwitchAddressSpaceBits());
   const bool allowShortcutAutolaunch=SwitchLaunch::AllowShortcutAutolaunch(
     pendingLaunchError,addressSpaceError,isAppletMode());
+  // Holding L+R while a HOME shortcut opens skips the autolaunch and shows the whole launcher.
+  const bool settingsComboHeld=allowShortcutAutolaunch&&holdingSettingsCombo();
 
   if(!positionalForwarderPath.empty() && allowShortcutAutolaunch){
     const char *directories[]={
@@ -8500,7 +8553,7 @@ int main(int argc, char **argv){
 
   bool forwarderRequested=false,forwarderMatched=false;
   std::string forwarderKey;
-  for(int ai=allowShortcutAutolaunch?1:argc; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
+  for(int ai=(allowShortcutAutolaunch&&!settingsComboHeld)?1:argc; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
     forwarderRequested=true;
     forwarderKey=argv[ai+1];
     splitLaunchModeKey(forwarderKey);
