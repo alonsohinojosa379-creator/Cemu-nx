@@ -7090,7 +7090,23 @@ static void applyLaunchMode() {
   if (g_launchModeId.empty()) return;
   for (const LaunchMode &mode : kLaunchModes) {
     if (g_launchModeId != mode.id) continue;
-    if (mode.args) writeAtomicText(RELAUNCH_ARGS_FILE, mode.args);
+    // Optional user tweaks: sdmc:/switch/cemu/extra_args_<id>.txt (e.g. "+set r_scaleViewport 0.75"),
+    // tokens split on whitespace and appended after the mode's own arguments.
+    std::string args = mode.args ? mode.args : "";
+    {
+      const std::string extraPath = std::string("sdmc:/switch/cemu/extra_args_") + mode.id + ".txt";
+      if (FILE *f = fopen(extraPath.c_str(), "rb")) {
+        std::string tok;
+        int c;
+        while ((c = fgetc(f)) != EOF) {
+          if (c == ' ' || c == '\t' || c == '\r' || c == '\n') { if (!tok.empty()) { args += tok + "\n"; tok.clear(); } }
+          else tok.push_back((char)c);
+        }
+        if (!tok.empty()) args += tok + "\n";
+        fclose(f);
+      }
+    }
+    if (!args.empty()) writeAtomicText(RELAUNCH_ARGS_FILE, args.c_str());
     else remove(RELAUNCH_ARGS_FILE);
     return;
   }
