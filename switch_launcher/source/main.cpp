@@ -8461,7 +8461,10 @@ int main(int argc, char **argv){
   bool storageIntegrated=false;
   Uint32 usbRefreshAt=0;
 
-  if (!cemu_hasConfiguredDiscKey("sdmc:/switch/cemu/keys.txt"))
+  // The notice only matters for WUX games and is just noise when a HOME shortcut starts a game.
+  bool startedFromShortcut=false;
+  for(int ai=1;ai+1<argc;++ai) if(strcmp(argv[ai],"-g")==0) startedFromShortcut=true;
+  if (!startedFromShortcut && !cemu_hasConfiguredDiscKey("sdmc:/switch/cemu/keys.txt"))
     modalMessageStatic("Disc key required", {
       "Cemu/keys.txt does not contain a Wii U disc key.",
       "WUX games cannot be decrypted until a valid key is added.",
