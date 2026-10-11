@@ -8148,7 +8148,9 @@ static bool holdingSettingsCombo() {
   padConfigureInput(1,HidNpadStyleSet_NpadStandard);
   padInitializeDefault(&pad);
   const u64 mask=HidNpadButton_L|HidNpadButton_R;
-  for(int i=0;i<6;i++){
+  // Poll for ~2 s: the pad state can take a moment to appear after the HOME Menu hands over, and
+  // the combo may be pressed a little after the icon was tapped.
+  for(int i=0;i<66;i++){
     padUpdate(&pad);
     if((padGetButtons(&pad)&mask)==mask) return true;
     svcSleepThread(30ull*1000ull*1000ull);
