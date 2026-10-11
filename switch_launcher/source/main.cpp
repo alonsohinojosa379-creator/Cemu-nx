@@ -7060,6 +7060,42 @@ static bool pickIcon(Game &g, char *outPath, size_t outSize) {
   return false;
 }
 
+// Black Ops II picks its game mode from launch arguments (the core restarts itself with them
+// when a mode is chosen in the game's menu). A HOME shortcut can carry one of these modes: its
+// key gets a "__mode_<id>" suffix and the launcher drops the matching relaunch_args.txt, which the
+// core reads (and removes) when it starts.
+static const uint64_t BO2_TITLE_ID = 0x000500001010cf00ULL;
+struct LaunchMode { const char *id; const char *label; const char *args; };
+static const LaunchMode kLaunchModes[] = {
+  {"sp", "Campaign", nullptr},
+  {"zm", "Zombies", "+zm\n+set\ncom_introPlayed\n1\n+set\nwiiu_activeControllerOnRelaunch\n4\n"},
+  {"mp", "Multiplayer", "+mp\n+set\ncom_introPlayed\n1\n+set\nwiiu_activeControllerOnRelaunch\n4\n"},
+};
+static const char *const LAUNCH_MODE_SEPARATOR = "__mode_";
+static const char *const RELAUNCH_ARGS_FILE = "sdmc:/switch/cemu/relaunch_args.txt";
+static std::string g_launchModeId;
+
+// Strips a "__mode_<id>" suffix from a shortcut key and remembers the mode.
+static bool splitLaunchModeKey(std::string &key) {
+  const size_t pos = key.rfind(LAUNCH_MODE_SEPARATOR);
+  if (pos == std::string::npos) return false;
+  const std::string id = key.substr(pos + strlen(LAUNCH_MODE_SEPARATOR));
+  for (const LaunchMode &mode : kLaunchModes) {
+    if (id == mode.id) { g_launchModeId = id; key.resize(pos); return true; }
+  }
+  return false;
+}
+
+static void applyLaunchMode() {
+  if (g_launchModeId.empty()) return;
+  for (const LaunchMode &mode : kLaunchModes) {
+    if (g_launchModeId != mode.id) continue;
+    if (mode.args) writeAtomicText(RELAUNCH_ARGS_FILE, mode.args);
+    else remove(RELAUNCH_ARGS_FILE);
+    return;
+  }
+}
+
 static void forwarderWizard(Game &g) {
   const GameDetailLayout layout=gameDetailLayout();
   const int isz=260;
@@ -7078,6 +7114,8 @@ static void forwarderWizard(Game &g) {
     else if(!g.iconPath.empty() && stat(g.iconPath.c_str(),&st)==0) snprintf(icon,sizeof(icon),"%s",g.iconPath.c_str()); }
   SDL_Texture *iconTex = icon[0] ? loadScaledTexture(icon,isz,isz) : nullptr;
   int sel=0; bool done=false; beginScreenFx();
+  const bool modesAvailable=g.titleId==BO2_TITLE_ID;
+  int modeIdx=-1; // -1: plain shortcut, otherwise an index into kLaunchModes
 
   auto edit=[&](const char *hdr, char *buf, size_t sz){
     char b[256];
@@ -7096,7 +7134,10 @@ static void forwarderWizard(Game &g) {
     drawStaticTextC(g_font, SW/2, SH/2, "Building + installing forwarder...", COL_TXT);
     SDL_RenderPresent(g_ren);
     appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
-    char err[256]={0}; bool ok=forwarder_create(g.key,g.legacyKey,name,author,icon,err,sizeof(err));
+    char err[256]={0};
+    const std::string modeSuffix=modeIdx>=0?std::string(LAUNCH_MODE_SEPARATOR)+kLaunchModes[modeIdx].id:std::string();
+    bool ok=forwarder_create(g.key+modeSuffix,g.legacyKey.empty()?std::string():g.legacyKey+modeSuffix,
+                             name,author,icon,err,sizeof(err));
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
     if(ok){ toastStatic("HOME shortcut installed"); done=true; }
     else modalMessageStatic("Shortcut failed", { std::string(err[0]?err:"Unknown error") });
@@ -7133,10 +7174,18 @@ static void forwarderWizard(Game &g) {
         case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  sel=(sel==0)?1:(sel==3?1:sel+1); break;
         case BTN_CONFIRM: activate(); break;
         case BTN_CANCEL:  done=true; break;
+        case BTN_SETTINGS:
+          if(modesAvailable){
+            modeIdx=modeIdx+1>=(int)(sizeof(kLaunchModes)/sizeof(kLaunchModes[0]))?-1:modeIdx+1;
+            snprintf(name,sizeof(name),"%s%s%s",g.title.c_str(),modeIdx>=0?" - ":"",
+                     modeIdx>=0?kLaunchModes[modeIdx].label:"");
+          }
+          break;
       }
     }
     clearUiBackground();
-    drawHeaderStatic("Create HOME shortcut", g.title.c_str());
+    const std::string headerSub=modeIdx>=0?g.title+" ["+kLaunchModes[modeIdx].label+"]":g.title;
+    drawHeaderStatic("Create HOME shortcut", headerSub.c_str());
     { SDL_Rect iconRect={ix,iy,isz,isz}; drawArtworkPreview(iconTex,iconRect,sel==0); }
     drawTextC(g_font_sm, ix+isz/2, iy+isz+20,
               LauncherLocalization::Translate("Icon").data(), sel==0?COL_VAL:COL_DIM);
@@ -7153,9 +7202,11 @@ static void forwarderWizard(Game &g) {
       drawTextC(g_font, rx+rw/2, createY-6+(createH-fontHeight(g_font))/2,
                 LauncherLocalization::Translate("Create shortcut").data(),
                 cur?COL_VAL:COL_TXT); }
+    std::string modeHint=modeIdx>=0?std::string("Mode: ")+kLaunchModes[modeIdx].label:std::string("Mode: none");
     FootItem footer[]={{g_gA,LauncherLocalization::Translate(sel==3?"Create shortcut":"Edit").data(),FA_NONE},
-                       {g_gB,LauncherLocalization::Translate("Back").data(),FA_NONE}};
-    drawFooterHints(footer,2,SH-26);
+                       {g_gB,LauncherLocalization::Translate("Back").data(),FA_NONE},
+                       {g_gX,modeHint.c_str(),FA_NONE}};
+    drawFooterHints(footer,modesAvailable?3:2,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextUiFrame();
   }
   if(iconTex) SDL_DestroyTexture(iconTex);
@@ -8449,6 +8500,7 @@ int main(int argc, char **argv){
   for(int ai=allowShortcutAutolaunch?1:argc; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
     forwarderRequested=true;
     forwarderKey=argv[ai+1];
+    splitLaunchModeKey(forwarderKey);
     if (Game *game = findGameByKey(forwarderKey)){ selectGame(*game); forwarderMatched=true; }
     break;
   }
@@ -8772,7 +8824,10 @@ int main(int argc, char **argv){
                             usbId,physicalId,relative))
         configOk=appendHandoffValue(handoff,"game_usb_id",usbId)&&
                  appendHandoffValue(handoff,"game_usb_relative",relative);
-      if (configOk) configOk = writeAtomicText(LAUNCH_HANDOFF, handoff);
+      if (configOk) {
+        if (launchTitleId == BO2_TITLE_ID) applyLaunchMode();
+        configOk = writeAtomicText(LAUNCH_HANDOFF, handoff);
+      }
     }
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
     if(configOk) willChain=true;
