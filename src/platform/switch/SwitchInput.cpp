@@ -16,6 +16,7 @@ extern "C" {
 #include <string>
 #include <unordered_map>
 
+#include "Cemu/Logging/CemuLogging.h"
 #include "input/InputManager.h"
 #include "input/api/Controller.h"
 #include "input/emulated/VPADController.h"
@@ -135,6 +136,21 @@ class SwitchGamepadController : public ControllerBase
 		m_connected = padIsConnected(&m_pad);
 		updateMotion();
 		const uint64_t b = padGetButtons(&m_pad);
+		{
+			// Diagnostics: shows whether the Switch pad reaches the emulator at all (first 80 changes).
+			static uint64_t s_lastButtons = ~0ull;
+			static int s_lastConnected = -1;
+			static int s_logged = 0;
+			if (s_logged < 80 && (s_lastButtons != b || s_lastConnected != (m_connected ? 1 : 0)))
+			{
+				s_lastButtons = b;
+				s_lastConnected = m_connected ? 1 : 0;
+				++s_logged;
+				cemuLog_log(LogType::Force, "Switch input: npad {} connected={} handheld={} style=0x{:x} buttons=0x{:x}",
+				            static_cast<unsigned>(m_npadId), m_connected, padIsHandheld(&m_pad),
+				            padGetStyleSet(&m_pad), b);
+			}
+		}
 		if (SwitchOverlay_IsInputCaptured(b))
 		{
 			const bool clearMouse = m_touchDown || m_mainMouseWasDown;
@@ -686,6 +702,8 @@ void SwitchInput_Setup()
 	else if (s_config.type == "Classic")
 		type = SwitchControllerType::Classic;
 	ConfigureControllers(type);
+	cemuLog_log(LogType::Force, "Switch input: controller type {} (0=GamePad,1=Pro,2=Classic), {} player(s)",
+	            static_cast<int>(type), s_config.players);
 }
 
 void SwitchInput_Shutdown()
