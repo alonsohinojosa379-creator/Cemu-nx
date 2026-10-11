@@ -485,6 +485,19 @@ namespace WindowSystem
 		fs::remove(path, ec);
 		if (!args.empty())
 		{
+			// the restart overwrites log.txt, so keep the arguments in a file that survives
+			// (appended, one block per relaunch) and print them in this run's log as well
+			{
+				std::ofstream history(ActiveSettings::GetUserDataPath("relaunch_history.txt"), std::ios::app);
+				if (history.is_open())
+				{
+					history << "--- relaunch with " << args.size() << " argument(s) ---\n";
+					for (size_t i = 0; i < args.size(); ++i)
+						history << "arg[" << i << "]=" << args[i] << '\n';
+				}
+			}
+			for (size_t i = 0; i < args.size(); ++i)
+				cemuLog_log(LogType::Force, "Switch: relaunch arg[{}]='{}'", i, args[i]);
 			cemuLog_log(LogType::Force, "Switch: restarted for a title relaunch, {} argument(s)", args.size());
 			CafeSystem::SetOverrideArgs(args);
 		}
