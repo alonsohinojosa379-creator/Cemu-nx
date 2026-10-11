@@ -67,6 +67,9 @@
 #include "Cafe/HW/SI/si.h"
 
 #include <time.h>
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
 
 #if BOOST_OS_LINUX
 #include <sys/sysinfo.h>
@@ -426,6 +429,9 @@ void cemu_initForGame()
 	IAudioInputAPI::PrintLogging();
 	// everything initialized
 	cemuLog_log(LogType::Force, "------- Run title -------");
+#if defined(__SWITCH__)
+	SwitchThread_StartMemoryMonitor();
+#endif
 	// wait till GPU thread is initialized
 	while (g_isGPUInitFinished == false) std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	// run coreinit rpl_entry

@@ -17,3 +17,8 @@ void SwitchThread_AllowHelperCore(const char* what);
 // thread could not be created. Uses only C stdio and syscalls, so it is safe to call when
 // the C++ unwinder is not.
 void SwitchThread_ReportCreateFailure(const char* what, int errorCode);
+
+// Starts a tiny background thread that appends the process memory totals and the allocator
+// state to sdmc:/switch/cemu/memlog.txt every few seconds (the file is rewritten at start).
+// It never throws and silently does nothing when the thread cannot be created.
+void SwitchThread_StartMemoryMonitor();

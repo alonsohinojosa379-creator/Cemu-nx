@@ -4,6 +4,8 @@
 
 #include <cstdio>
 #include <malloc.h>
+#include <pthread.h>
+#include <time.h>
 
 #include "Cemu/Logging/CemuLogging.h"
 
@@ -102,4 +104,53 @@ void SwitchThread_ReportCreateFailure(const char* what, int errorCode)
 	std::fprintf(file, "malloc_arena=%d malloc_in_use=%d malloc_free=%d\n", allocator.arena, allocator.uordblks,
 	             allocator.fordblks);
 	std::fclose(file);
+}
+
+namespace
+{
+	void* MemoryMonitorMain(void*)
+	{
+		const time_t start = time(nullptr);
+		u64 lowestFree = ~0ull;
+		for (;;)
+		{
+			u64 memoryTotal = 0, memoryUsed = 0;
+			svcGetInfo(&memoryTotal, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+			svcGetInfo(&memoryUsed, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+			const u64 memoryFree = memoryTotal > memoryUsed ? memoryTotal - memoryUsed : 0;
+			if (memoryFree < lowestFree)
+				lowestFree = memoryFree;
+			const struct mallinfo allocator = mallinfo();
+			if (FILE* file = std::fopen("sdmc:/switch/cemu/memlog.txt", "a"))
+			{
+				std::fprintf(file, "t=%llds free=%lluMB lowest_free=%lluMB used=%lluMB malloc_in_use=%dMB malloc_arena=%dMB\n",
+				             static_cast<long long>(time(nullptr) - start),
+				             static_cast<unsigned long long>(memoryFree >> 20),
+				             static_cast<unsigned long long>(lowestFree >> 20),
+				             static_cast<unsigned long long>(memoryUsed >> 20), allocator.uordblks >> 20,
+				             allocator.arena >> 20);
+				std::fclose(file);
+			}
+			svcSleepThread(5ull * 1000ull * 1000ull * 1000ull);
+		}
+		return nullptr;
+	}
+} // namespace
+
+void SwitchThread_StartMemoryMonitor()
+{
+	static bool started = false;
+	if (started)
+		return;
+	started = true;
+	if (FILE* file = std::fopen("sdmc:/switch/cemu/memlog.txt", "w"))
+		std::fclose(file);
+	pthread_attr_t attr;
+	if (pthread_attr_init(&attr) != 0)
+		return;
+	pthread_attr_setstacksize(&attr, 32 * 1024);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_t thread;
+	pthread_create(&thread, &attr, MemoryMonitorMain, nullptr);
+	pthread_attr_destroy(&attr);
 }
