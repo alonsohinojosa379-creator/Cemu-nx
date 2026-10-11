@@ -12,7 +12,7 @@ namespace
 	constexpr size_t kHeapAlignment = 2 * MiB;
 	constexpr size_t kBudgetAlignment = 32 * MiB;
 	constexpr size_t kMandatoryGuestBacking = 0x563F0000ull;
-	constexpr size_t kMinimumFlexiblePool = 224 * MiB;
+	constexpr size_t kMinimumFlexiblePool = 128 * MiB;
 	constexpr size_t kMaximumFlexiblePool = 640 * MiB;
 	constexpr size_t kMinimumNewlibHeap = 768 * MiB;
 	constexpr size_t kJumpTableChunkSize = 64 * MiB;
@@ -50,12 +50,12 @@ namespace
 
 	size_t GetSafetyReserve()
 	{
-		return ScaledBudget(12, 96 * MiB, 256 * MiB);
+		return ScaledBudget(8, 160 * MiB, 320 * MiB);
 	}
 
 	size_t GetStagingLimit()
 	{
-		return ScaledBudget(16, 64 * MiB, 256 * MiB);
+		return ScaledBudget(24, 48 * MiB, 160 * MiB);
 	}
 }
 
@@ -64,7 +64,7 @@ size_t SwitchMemoryBudget_ComputeGuestPoolSize(size_t heapTotal)
 	if (heapTotal <= kMandatoryGuestBacking + kMinimumNewlibHeap)
 		return 0;
 
-	const size_t proportionalFlexiblePool = AlignUp(heapTotal / 14, kHeapAlignment);
+	const size_t proportionalFlexiblePool = AlignUp(heapTotal / 24, kHeapAlignment);
 	const size_t flexiblePool = std::clamp(proportionalFlexiblePool,
 		kMinimumFlexiblePool, kMaximumFlexiblePool);
 	size_t desiredPool = kMandatoryGuestBacking + flexiblePool;
