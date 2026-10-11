@@ -14,6 +14,10 @@
 
 #include <fmt/printf.h>
 
+#if defined(__SWITCH__)
+#include <pthread.h>
+#endif
+
 uint64 s_loggingFlagMask = cemuLog_getFlag(LogType::Force);
 
 class LoggingDispatcher
@@ -82,11 +86,27 @@ struct _LogContext
 	std::vector<std::string> text_cache;
 	std::thread log_writer;
 	std::atomic<bool> threadRunning = false;
+#if defined(__SWITCH__)
+	// The Switch build starts the writer with pthread_create directly: std::thread reports a
+	// failure by throwing, and the C++ unwinder of this build crashes while handling the first
+	// exception. Without a writer thread, lines are written synchronously instead.
+	pthread_t nativeWriter{};
+	bool nativeWriterStarted = false;
+	bool synchronousWrites = false;
+#endif
 
 	~_LogContext()
 	{
 		// safely shut down the log writer thread
 		threadRunning.store(false);
+#if defined(__SWITCH__)
+		if (nativeWriterStarted)
+		{
+			log_condition.notify_one();
+			pthread_join(nativeWriter, nullptr);
+			nativeWriterStarted = false;
+		}
+#endif
 		if (log_writer.joinable())
 		{
 			log_condition.notify_one();
@@ -180,7 +200,32 @@ void cemuLog_createLogFile(bool triggeredByCrash)
 	}
 
 	LogContext.threadRunning.store(true);
+#if defined(__SWITCH__)
+	const int createResult = pthread_create(
+		&LogContext.nativeWriter, nullptr,
+		[](void*) -> void* {
+			cemuLog_thread();
+			return nullptr;
+		},
+		nullptr);
+	if (createResult == 0)
+	{
+		LogContext.nativeWriterStarted = true;
+	}
+	else
+	{
+		// Keep going without a writer thread: flush what is queued and write synchronously.
+		LogContext.threadRunning.store(false);
+		LogContext.synchronousWrites = true;
+		for (const auto& entry : LogContext.text_cache)
+			LogContext.file_stream.write(entry.data(), entry.size());
+		LogContext.text_cache.clear();
+		LogContext.file_stream.flush();
+		SwitchThread_ReportCreateFailure("cemuLog_thread", createResult);
+	}
+#else
 	LogContext.log_writer = std::thread(cemuLog_thread);
+#endif
 	lock.unlock();
 }
 
@@ -204,6 +249,17 @@ void cemuLog_writeLineToLog(std::string_view text, bool date, bool new_line)
 
 	if (new_line)
 		LogContext.text_cache.emplace_back("\n");
+
+#if defined(__SWITCH__)
+	if (LogContext.synchronousWrites)
+	{
+		for (const auto& entry : LogContext.text_cache)
+			LogContext.file_stream.write(entry.data(), entry.size());
+		LogContext.text_cache.clear();
+		LogContext.file_stream.flush();
+		return;
+	}
+#endif
 
 	lock.unlock();
 	LogContext.log_condition.notify_one();

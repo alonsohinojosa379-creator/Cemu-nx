@@ -1,5 +1,6 @@
 #include <switch.h>
 #include <atomic>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +32,23 @@ u64 g_switchProcessMemoryTotal = 0;
 u64 g_switchProcessMemoryUsed = 0;
 Result g_switchHeapExpansionResult = 0;
 bool g_switchHeapExpansionAttempted = false;
+
+// Mappings that a previous core left behind in the heap (the loader keeps the process when it
+// chainloads, so thread stacks that were never unmapped stay inaccessible: perm 0, type heap).
+// Found in __libnx_initheap, before malloc exists, so only static storage is used here.
+struct SwitchHeapHole
+{
+	u64 address;
+	u64 size;
+	u32 type;
+	u32 perm;
+	u32 attr;
+};
+constexpr u32 kMaxHeapHoles = 64;
+SwitchHeapHole g_switchHeapHoles[kMaxHeapHoles];
+u32 g_switchHeapHoleCount = 0;
+u64 g_switchHeapSpanBefore = 0;
+u64 g_switchHeapSpanAfter = 0;
 
 
 namespace
@@ -145,6 +163,81 @@ namespace
 	}
 }
 
+namespace
+{
+	// Keeps newlib's heap inside the largest run of readable and writable pages, so malloc never
+	// hands out memory that a previous core still has mapped elsewhere (thread stacks).
+	void SkipLeftoverHeapMappings(char*& heapStart, char*& heapEnd, size_t& heapSize)
+	{
+		const u64 begin = reinterpret_cast<u64>(heapStart);
+		const u64 end = reinterpret_cast<u64>(heapEnd);
+		g_switchHeapSpanBefore = end - begin;
+		g_switchHeapHoleCount = 0;
+
+		u64 bestStart = begin, bestSize = 0, runStart = begin, address = begin;
+		bool anyHole = false;
+		while (address < end)
+		{
+			MemoryInfo info{};
+			u32 pageInfo = 0;
+			if (R_FAILED(svcQueryMemory(&info, &pageInfo, address)))
+				return; // cannot scan, keep the heap as it is
+			const u64 blockEnd = std::min<u64>(info.addr + info.size, end);
+			const bool readableWritable = (info.perm & Perm_Rw) == Perm_Rw;
+			if (!readableWritable)
+			{
+				anyHole = true;
+				if (g_switchHeapHoleCount < kMaxHeapHoles)
+					g_switchHeapHoles[g_switchHeapHoleCount++] = {address, blockEnd - address, info.type, info.perm, info.attr};
+				if (address - runStart > bestSize)
+				{
+					bestStart = runStart;
+					bestSize = address - runStart;
+				}
+				runStart = blockEnd;
+			}
+			address = blockEnd;
+		}
+		if (!anyHole)
+		{
+			g_switchHeapSpanAfter = g_switchHeapSpanBefore;
+			return;
+		}
+		if (end - runStart > bestSize)
+		{
+			bestStart = runStart;
+			bestSize = end - runStart;
+		}
+		// newlib wants 16-byte alignment; keep 2 MiB alignment at the start for the allocator's sake
+		const u64 alignedStart = (bestStart + 0x1FFFFF) & ~0x1FFFFFull;
+		if (alignedStart >= bestStart + bestSize)
+			return;
+		bestSize -= alignedStart - bestStart;
+		heapStart = reinterpret_cast<char*>(alignedStart);
+		heapEnd = reinterpret_cast<char*>(alignedStart + bestSize);
+		heapSize = static_cast<size_t>(bestSize);
+		g_switchHeapSpanAfter = bestSize;
+	}
+
+	void WriteHeapScanReport()
+	{
+		FILE* file = std::fopen("sdmc:/switch/cemu/heap-scan.txt", "a");
+		if (!file)
+			return;
+		std::fprintf(file, "heap span before=%llu after=%llu holes=%u\n",
+		             static_cast<unsigned long long>(g_switchHeapSpanBefore),
+		             static_cast<unsigned long long>(g_switchHeapSpanAfter), g_switchHeapHoleCount);
+		for (u32 index = 0; index < g_switchHeapHoleCount; ++index)
+		{
+			const SwitchHeapHole& hole = g_switchHeapHoles[index];
+			std::fprintf(file, "  hole 0x%llx+0x%llx type=0x%x perm=0x%x attr=0x%x\n",
+			             static_cast<unsigned long long>(hole.address), static_cast<unsigned long long>(hole.size),
+			             hole.type, hole.perm, hole.attr);
+		}
+		std::fclose(file);
+	}
+}
+
 extern "C"
 {
 	u32 __nx_applet_type = AppletType_Application;
@@ -211,6 +304,7 @@ extern "C"
 			fake_heap_end = heapBase + heapTotal;
 			g_switchNewlibHeapSize = heapTotal;
 		}
+		SkipLeftoverHeapMappings(fake_heap_start, fake_heap_end, g_switchNewlibHeapSize);
 	}
 }
 
@@ -330,6 +424,7 @@ int main(int argc, char* argv[])
 {
 	std::set_terminate(SwitchTerminateHandler);
 	const bool platformInitialized = SwitchPlatformInit();
+	WriteHeapScanReport();
 	if (!platformInitialized)
 	{
 		WriteLastCoreError("platform", "platform initialization failed");
