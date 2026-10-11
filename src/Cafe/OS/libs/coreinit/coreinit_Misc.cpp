@@ -746,6 +746,10 @@ namespace coreinit
 		std::vector<std::string> argArray;
 		for(uint32 i=0; i<argc; i++)
 			argArray.emplace_back(argv[i]);
+		cemuLog_log(LogType::Force, "LaunchByTitleId: title {:016x} argc={}", titleId, argc);
+		for(size_t i=0; i<argArray.size(); i++)
+			cemuLog_log(LogType::Force, "LaunchByTitleId: arg[{}]='{}'", i, argArray[i]);
+		cemuLog_waitForFlush();
 		CafeSystem::SetOverrideArgs(argArray);
 		// spawn launcher thread (this current thread will be destroyed during relaunch)
 		cemuCreateDetachedThread(OSLauncherThread, titleId);
