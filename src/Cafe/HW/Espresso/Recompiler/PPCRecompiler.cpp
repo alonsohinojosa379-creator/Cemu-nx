@@ -14,9 +14,13 @@
 
 #include <array>
 #include <mutex>
+#include <set>
+#include <vector>
+#include <algorithm>
 
 #if defined(__SWITCH__)
 #include <condition_variable>
+#include <switch.h>
 #include <system_error>
 #include <unordered_set>
 #include "platform/switch/SwitchJit.h"
@@ -87,6 +91,141 @@ static_assert(sizeof(PPCRecompilerInstanceData_t) <= 0x1000,
 
 #if PPCREC_FORCE_SYNCHRONOUS_COMPILATION
 static std::mutex s_singleRecompilationMutex;
+#endif
+
+
+#if defined(__SWITCH__)
+// ---- JIT prewarm: remember which functions were compiled per module and compile them early next run ----
+namespace
+{
+	struct PrewarmModule
+	{
+		uint32 crc;
+		uint32 base;
+		uint32 size;
+		std::set<uint32> hot; // offsets from base
+		bool dirty{false};
+	};
+	std::mutex s_prewarmMutex;
+	std::vector<PrewarmModule> s_prewarmModules;
+	std::vector<uint32> s_prewarmQueue; // absolute addresses, consumed from the back
+	bool s_prewarmDisabled = false;
+	bool s_prewarmInit = false;
+	uint64 s_prewarmLastSave = 0;
+
+	void PrewarmInit()
+	{
+		if (s_prewarmInit)
+			return;
+		s_prewarmInit = true;
+		FILE* f = fopen("sdmc:/switch/cemu/no_jit_prewarm.txt", "rb");
+		if (f)
+		{
+			s_prewarmDisabled = true;
+			fclose(f);
+		}
+	}
+	void PrewarmPath(char* out, size_t n, uint32 crc)
+	{
+		snprintf(out, n, "sdmc:/switch/cemu/jit_hot_%08x.bin", crc);
+	}
+	void PrewarmSaveLocked()
+	{
+		for (auto& m : s_prewarmModules)
+		{
+			if (!m.dirty)
+				continue;
+			m.dirty = false;
+			char path[96];
+			PrewarmPath(path, sizeof(path), m.crc);
+			FILE* f = fopen(path, "wb");
+			if (!f)
+				continue;
+			std::vector<uint32> v(m.hot.begin(), m.hot.end());
+			fwrite(v.data(), 4, v.size(), f);
+			fclose(f);
+		}
+	}
+}
+
+void PPCRecompiler_prewarmModuleLoaded(uint32 crc, uint32 textBase, uint32 textSize)
+{
+	PrewarmInit();
+	if (s_prewarmDisabled || textBase == 0 || textSize == 0)
+		return;
+	std::lock_guard<std::mutex> lock(s_prewarmMutex);
+	PrewarmModule* mod = nullptr;
+	for (auto& m : s_prewarmModules)
+		if (m.crc == crc)
+			mod = &m;
+	if (!mod)
+	{
+		s_prewarmModules.push_back(PrewarmModule{crc, textBase, textSize, {}, false});
+		mod = &s_prewarmModules.back();
+	}
+	mod->base = textBase;
+	mod->size = textSize;
+	char path[96];
+	PrewarmPath(path, sizeof(path), crc);
+	FILE* f = fopen(path, "rb");
+	size_t added = 0;
+	if (f)
+	{
+		uint32 off;
+		while (added < 30000 && fread(&off, 4, 1, f) == 1)
+		{
+			if ((off & 3) || off >= textSize)
+				continue;
+			mod->hot.insert(off);
+			s_prewarmQueue.push_back(textBase + off);
+			added++;
+		}
+		fclose(f);
+	}
+	// queue is consumed from the back, so reverse to compile in ascending order
+	std::reverse(s_prewarmQueue.begin(), s_prewarmQueue.end());
+	cemuLog_log(LogType::Force, "JIT prewarm: module crc 0x{:08x}: {} hot functions queued", crc, added);
+	{
+		std::lock_guard<std::mutex> l2(s_ppcRecompilerState.workerWakeMutex);
+		s_ppcRecompilerState.workerWakePending = true;
+	}
+	s_ppcRecompilerState.workerWakeCv.notify_one();
+}
+
+static void PPCRecompiler_prewarmRecord(uint32 address)
+{
+	if (s_prewarmDisabled)
+		return;
+	std::lock_guard<std::mutex> lock(s_prewarmMutex);
+	for (auto& m : s_prewarmModules)
+	{
+		if (address >= m.base && address - m.base < m.size)
+		{
+			if (m.hot.size() < 40000 && m.hot.insert(address - m.base).second)
+				m.dirty = true;
+			break;
+		}
+	}
+	uint64 now = armGetSystemTick();
+	if (now - s_prewarmLastSave > 30ull * 19200000ull)
+	{
+		s_prewarmLastSave = now;
+		PrewarmSaveLocked();
+	}
+}
+
+// returns next address to prewarm (0 if none)
+static uint32 PPCRecompiler_prewarmPop()
+{
+	std::lock_guard<std::mutex> lock(s_prewarmMutex);
+	if (s_prewarmQueue.empty())
+		return 0;
+	uint32 a = s_prewarmQueue.back();
+	s_prewarmQueue.pop_back();
+	return a;
+}
+#else
+void PPCRecompiler_prewarmModuleLoaded(uint32, uint32, uint32) {}
 #endif
 
 void PPCRecompiler_recompileAtAddress(uint32 address);
@@ -515,6 +654,10 @@ void PPCRecompiler_recompileAtAddress(uint32 address)
 		delete func;
 #endif
 	}
+#if defined(__SWITCH__)
+	else
+		PPCRecompiler_prewarmRecord(address);
+#endif
 }
 
 void PPCRecompiler_thread()
@@ -550,6 +693,24 @@ void PPCRecompiler_thread()
 			s_ppcRecompilerState.recompilerSpinlock.lock();
 			if (s_ppcRecompilerState.targetQueue.empty())
 			{
+#if defined(__SWITCH__)
+				// nothing demanded by the game: compile one remembered hot function, then re-check demand
+				uint32 pre = PPCRecompiler_prewarmPop();
+				if (pre != 0)
+				{
+					if (ppcRecompilerInstanceData->GetJumpTableEntry(pre) == PPCRecompiler_leaveRecompilerCode_unvisited &&
+						ppcRecompilerInstanceData->SetJumpTableEntry(pre, PPCRecompiler_leaveRecompilerCode_visited))
+					{
+						s_ppcRecompilerState.recompilerSpinlock.unlock();
+						PPCRecompiler_recompileAtAddress(pre);
+						if (s_ppcRecompilerState.workerThreadStopSignal)
+							return;
+						continue;
+					}
+					s_ppcRecompilerState.recompilerSpinlock.unlock();
+					continue;
+				}
+#endif
 				s_ppcRecompilerState.recompilerSpinlock.unlock();
 				break;
 			}
@@ -989,6 +1150,9 @@ void PPCRecompiler_Shutdown()
 #endif
     if(s_ppcRecompilerState.workerThread.joinable())
         s_ppcRecompilerState.workerThread.join();
+#if defined(__SWITCH__)
+	{ std::lock_guard<std::mutex> l(s_prewarmMutex); PrewarmSaveLocked(); }
+#endif
     // clean up queues
     while(!s_ppcRecompilerState.targetQueue.empty())
         s_ppcRecompilerState.targetQueue.pop();

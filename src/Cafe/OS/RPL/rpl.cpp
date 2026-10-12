@@ -1879,6 +1879,7 @@ void RPLLoader_Link()
 		RPLLoader_LoadDebugSymbols(module);
 		module->isLinked = true; // mark as linked
 		GraphicPack2::NotifyModuleLoaded(module);
+		PPCRecompiler_prewarmModuleLoaded(module->patchCRC, module->regionMappingBase_text.GetMPTR(), module->regionSize_text);
 		g_debuggerDispatcher.NotifyModuleLoaded(module);
 	}
 }

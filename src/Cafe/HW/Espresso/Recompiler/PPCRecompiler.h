@@ -197,6 +197,7 @@ void PPCRecompiler_Enable();
 void PPCRecompiler_Disable();
 
 void PPCRecompiler_allocateRange(uint32 startAddress, uint32 size);
+void PPCRecompiler_prewarmModuleLoaded(uint32 crc, uint32 textBase, uint32 textSize);
 
 void PPCRecompiler_invalidateRange(uint32 startAddr, uint32 endAddr);
 
