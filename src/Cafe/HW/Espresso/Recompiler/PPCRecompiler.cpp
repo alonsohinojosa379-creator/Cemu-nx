@@ -15,12 +15,13 @@
 #include <array>
 #include <mutex>
 #include <set>
+#include <malloc.h>
+#include <chrono>
 #include <vector>
 #include <algorithm>
 
 #if defined(__SWITCH__)
 #include <condition_variable>
-#include <switch.h>
 #include <system_error>
 #include <unordered_set>
 #include "platform/switch/SwitchJit.h"
@@ -206,8 +207,8 @@ static void PPCRecompiler_prewarmRecord(uint32 address)
 			break;
 		}
 	}
-	uint64 now = armGetSystemTick();
-	if (now - s_prewarmLastSave > 30ull * 19200000ull)
+	uint64 now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	if (now - s_prewarmLastSave > 30)
 	{
 		s_prewarmLastSave = now;
 		PrewarmSaveLocked();
@@ -220,6 +221,12 @@ static uint32 PPCRecompiler_prewarmPop()
 	std::lock_guard<std::mutex> lock(s_prewarmMutex);
 	if (s_prewarmQueue.empty())
 		return 0;
+	// do not push the host heap towards its ~1.5GB ceiling just to warm code
+	if (mallinfo().arena > 1250 * 1024 * 1024)
+	{
+		s_prewarmQueue.clear();
+		return 0;
+	}
 	uint32 a = s_prewarmQueue.back();
 	s_prewarmQueue.pop_back();
 	return a;
