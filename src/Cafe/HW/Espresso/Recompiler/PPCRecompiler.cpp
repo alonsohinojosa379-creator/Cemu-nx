@@ -64,6 +64,7 @@ struct
 	std::atomic_int_fast32_t recompilerEnableCount{0};
 	// recompiler thread
 	std::thread workerThread;
+	std::thread workerThread2; // optional second compile worker (jit_workers.txt = 2)
 	std::atomic_bool workerThreadStopSignal{false};
 #if defined(__SWITCH__)
 	std::mutex workerWakeMutex;
@@ -190,7 +191,7 @@ void PPCRecompiler_prewarmModuleLoaded(uint32 crc, uint32 textBase, uint32 textS
 		std::lock_guard<std::mutex> l2(s_ppcRecompilerState.workerWakeMutex);
 		s_ppcRecompilerState.workerWakePending = true;
 	}
-	s_ppcRecompilerState.workerWakeCv.notify_one();
+	s_ppcRecompilerState.workerWakeCv.notify_all();
 }
 
 static void PPCRecompiler_prewarmRecord(uint32 address)
@@ -291,7 +292,7 @@ void PPCRecompiler_visitAddressNoBlock(uint32 enterAddress)
 		std::lock_guard<std::mutex> lock(s_ppcRecompilerState.workerWakeMutex);
 		s_ppcRecompilerState.workerWakePending = true;
 	}
-	s_ppcRecompilerState.workerWakeCv.notify_one();
+	s_ppcRecompilerState.workerWakeCv.notify_all();
 #endif
 }
 
@@ -667,9 +668,9 @@ void PPCRecompiler_recompileAtAddress(uint32 address)
 #endif
 }
 
-void PPCRecompiler_thread()
+void PPCRecompiler_thread(int workerIndex)
 {
-	SetThreadName("PPCRecompiler");
+	SetThreadName(workerIndex == 0 ? "PPCRecompiler" : "PPCRecompiler2");
 #if defined(__SWITCH__)
 #endif
 #if PPCREC_FORCE_SYNCHRONOUS_COMPILATION
@@ -1132,7 +1133,21 @@ void PPCRecompiler_init()
 	}
 	try
 	{
-		s_ppcRecompilerState.workerThread = std::thread(PPCRecompiler_thread);
+		s_ppcRecompilerState.workerThread = std::thread(PPCRecompiler_thread, 0);
+		{
+			unsigned workers = 1;
+			if (FILE* f = fopen("sdmc:/switch/cemu/jit_workers.txt", "rb"))
+			{
+				if (fscanf(f, "%u", &workers) != 1)
+					workers = 1;
+				fclose(f);
+			}
+			if (workers >= 2)
+			{
+				try { s_ppcRecompilerState.workerThread2 = std::thread(PPCRecompiler_thread, 1); }
+				catch (const std::system_error&) {}
+			}
+		}
 	}
 	catch (const std::system_error&)
 	{
@@ -1140,7 +1155,7 @@ void PPCRecompiler_init()
 		s_ppcRecompilerState.initialized = false;
 	}
 #else
-	s_ppcRecompilerState.workerThread = std::thread(PPCRecompiler_thread);
+	s_ppcRecompilerState.workerThread = std::thread(PPCRecompiler_thread, 0);
 #endif
 }
 
@@ -1153,10 +1168,12 @@ void PPCRecompiler_Shutdown()
         std::lock_guard<std::mutex> lock(s_ppcRecompilerState.workerWakeMutex);
         s_ppcRecompilerState.workerWakePending = true;
     }
-    s_ppcRecompilerState.workerWakeCv.notify_one();
+    s_ppcRecompilerState.workerWakeCv.notify_all();
 #endif
     if(s_ppcRecompilerState.workerThread.joinable())
         s_ppcRecompilerState.workerThread.join();
+    if(s_ppcRecompilerState.workerThread2.joinable())
+        s_ppcRecompilerState.workerThread2.join();
 #if defined(__SWITCH__)
 	{ std::lock_guard<std::mutex> l(s_prewarmMutex); PrewarmSaveLocked(); }
 #endif
