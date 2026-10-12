@@ -8162,7 +8162,7 @@ static bool holdingSettingsCombo() {
 // screen) opens the whole launcher instead of starting the game. Does not depend on reading the
 // pad state at the first instant, which is not reliable right after the HOME Menu hands over.
 static bool shortcutGraceOpensLauncher(){
-  const Uint32 until=SDL_GetTicks()+3000;
+  const Uint32 until=SDL_GetTicks()+8000;
   while(!SDL_TICKS_PASSED(SDL_GetTicks(),until)){
     if(!beginUiFrame()) return false;
     SDL_Event e;
@@ -8609,8 +8609,8 @@ int main(int argc, char **argv){
   std::vector<std::string> pendingMountedSources;
   bool keepLibrarySelection=false;
   if(!forwarderRequested){
-    // Credits splash (about 3 seconds, any button skips it)
-    const Uint32 splashEnd=SDL_GetTicks()+3000;
+    // Credits splash (about 8 seconds, any button skips it)
+    const Uint32 splashEnd=SDL_GetTicks()+8000;
     bool skip=false;
     while(!skip&&SDL_GetTicks()<splashEnd&&beginUiFrame()){
       SDL_Event ev;
