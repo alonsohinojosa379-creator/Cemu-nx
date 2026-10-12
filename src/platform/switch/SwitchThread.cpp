@@ -2,6 +2,7 @@
 
 #include <switch.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <malloc.h>
@@ -114,6 +115,33 @@ namespace
 	std::atomic<unsigned> s_evicted{0};
 }
 
+namespace
+{
+	struct ProfThread { char name[24]; Handle handle; u64 lastTicks; };
+	ProfThread s_profThreads[64];
+	std::atomic<unsigned> s_profCount{0};
+
+	bool ReadThreadTicks(Handle h, u64& out)
+	{
+		if (R_SUCCEEDED(svcGetInfo(&out, InfoType_ThreadTickCount, h, TickCountInfo_Total)))
+			return true;
+		return R_SUCCEEDED(svcGetInfo(&out, InfoType_ThreadTickCountDeprecated, h, UINT64_MAX));
+	}
+}
+
+void SwitchThread_RegisterCurrentThread(const char* name)
+{
+	const unsigned idx = s_profCount.fetch_add(1, std::memory_order_relaxed);
+	if (idx >= 64)
+		return;
+	ProfThread& t = s_profThreads[idx];
+	std::snprintf(t.name, sizeof(t.name), "%s", name ? name : "?");
+	t.lastTicks = 0;
+	Thread* self = threadGetSelf();
+	t.handle = self ? self->handle : INVALID_HANDLE;
+	std::atomic_thread_fence(std::memory_order_release);
+}
+
 void SwitchThread_CountShaderModule() { s_shaderModules.fetch_add(1, std::memory_order_relaxed); }
 void SwitchThread_CountEviction() { s_evicted.fetch_add(1, std::memory_order_relaxed); }
 void SwitchThread_CountPipeline() { s_pipelines.fetch_add(1, std::memory_order_relaxed); }
@@ -142,6 +170,34 @@ namespace
 				             static_cast<unsigned long long>(memoryUsed >> 20), allocator.uordblks >> 20,
 				             allocator.arena >> 20, s_shaderModules.load(), s_pipelines.load(), s_evicted.load());
 				std::fclose(file);
+			}
+			// per-thread CPU load (percent of one core) over the last interval
+			{
+				static u64 lastSystemTick = 0;
+				const u64 nowTick = armGetSystemTick();
+				const u64 dt = lastSystemTick ? nowTick - lastSystemTick : 0;
+				lastSystemTick = nowTick;
+				const unsigned count = std::min<unsigned>(s_profCount.load(std::memory_order_acquire), 64u);
+				if (dt && count)
+				{
+					if (FILE* file = std::fopen("sdmc:/switch/cemu/memlog.txt", "a"))
+					{
+						std::fprintf(file, "  cpu%%:");
+						for (unsigned i = 0; i < count; i++)
+						{
+							u64 ticks = 0;
+							if (s_profThreads[i].handle == INVALID_HANDLE || !ReadThreadTicks(s_profThreads[i].handle, ticks))
+								continue;
+							const u64 delta = s_profThreads[i].lastTicks ? ticks - s_profThreads[i].lastTicks : 0;
+							s_profThreads[i].lastTicks = ticks;
+							const unsigned pct = static_cast<unsigned>(delta * 100 / dt);
+							if (pct >= 3)
+								std::fprintf(file, " %s=%u", s_profThreads[i].name, pct);
+						}
+						std::fprintf(file, "\n");
+						std::fclose(file);
+					}
+				}
 			}
 			svcSleepThread(5ull * 1000ull * 1000ull * 1000ull);
 		}

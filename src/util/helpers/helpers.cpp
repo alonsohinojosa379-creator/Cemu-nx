@@ -6,6 +6,9 @@
 #include <random>
 
 #include "config/ActiveSettings.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
 
 #include <boost/random/uniform_int.hpp>
 
@@ -115,6 +118,9 @@ typedef struct tagTHREADNAME_INFO
 
 void SetThreadName(const char* name)
 {
+#if defined(__SWITCH__)
+	SwitchThread_RegisterCurrentThread(name);
+#endif
 #if BOOST_OS_WINDOWS
 	using SetThreadDescription_t = HRESULT (*)(HANDLE hThread, PCWSTR lpThreadDescription);
 	static SetThreadDescription_t pSetThreadDescription = nullptr;

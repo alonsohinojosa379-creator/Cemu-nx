@@ -27,3 +27,4 @@ void SwitchThread_StartMemoryMonitor();
 void SwitchThread_CountShaderModule();
 void SwitchThread_CountPipeline();
 void SwitchThread_CountEviction();
+void SwitchThread_RegisterCurrentThread(const char* name);
