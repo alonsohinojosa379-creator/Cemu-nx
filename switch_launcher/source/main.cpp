@@ -8162,7 +8162,7 @@ static bool holdingSettingsCombo() {
 // screen) opens the whole launcher instead of starting the game. Does not depend on reading the
 // pad state at the first instant, which is not reliable right after the HOME Menu hands over.
 static bool shortcutGraceOpensLauncher(){
-  const Uint32 until=SDL_GetTicks()+8000;
+  const Uint32 until=SDL_GetTicks()+3000;
   while(!SDL_TICKS_PASSED(SDL_GetTicks(),until)){
     if(!beginUiFrame()) return false;
     SDL_Event e;
