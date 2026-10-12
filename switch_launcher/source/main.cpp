@@ -8608,6 +8608,22 @@ int main(int argc, char **argv){
   if(forwarderPending&&!usbRefreshAt) usbRefreshAt=SDL_GetTicks()+300;
   std::vector<std::string> pendingMountedSources;
   bool keepLibrarySelection=false;
+  if(!forwarderRequested){
+    // Credits splash (about 3 seconds, any button skips it)
+    const Uint32 splashEnd=SDL_GetTicks()+3000;
+    bool skip=false;
+    while(!skip&&SDL_GetTicks()<splashEnd&&beginUiFrame()){
+      SDL_Event ev;
+      while(pollUiEvent(ev)){
+        if(ev.type==SDL_CONTROLLERBUTTONDOWN||ev.type==SDL_FINGERDOWN) skip=true;
+      }
+      clearUiBackground();
+      drawTextC(g_font_big,SW/2,SH/2-90,"Cemu",COL_TXT);
+      drawTextC(g_font,SW/2,SH/2-10,"Modificaci\xC3\xB3n hecha por ASCENCION H.O",COL_TXT);
+      drawTextC(g_font_sm,SW/2,SH/2+40,"Fork hecho por ASCENCION H.O  -  base Naga",COL_DIM);
+      SDL_RenderPresent(g_ren); waitForNextUiFrame();
+    }
+  }
   while(running && beginUiFrame()){
     if(g_libraryScan){
       std::string selectedKey;

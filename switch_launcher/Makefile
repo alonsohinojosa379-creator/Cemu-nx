@@ -7,7 +7,7 @@ $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/de
 endif
 
 APP_TITLE	:=	Cemu
-APP_AUTHOR	:=	naga
+APP_AUTHOR	:=	Ascencion H.O (base naga)
 RELEASE_VERSION	?=	1.2.0
 APP_VERSION	?=	$(RELEASE_VERSION)
 
