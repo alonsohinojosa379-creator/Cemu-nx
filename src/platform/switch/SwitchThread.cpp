@@ -2,6 +2,7 @@
 
 #include <switch.h>
 
+#include <atomic>
 #include <cstdio>
 #include <malloc.h>
 #include <pthread.h>
@@ -108,6 +109,15 @@ void SwitchThread_ReportCreateFailure(const char* what, int errorCode)
 
 namespace
 {
+	std::atomic<unsigned> s_shaderModules{0};
+	std::atomic<unsigned> s_pipelines{0};
+}
+
+void SwitchThread_CountShaderModule() { s_shaderModules.fetch_add(1, std::memory_order_relaxed); }
+void SwitchThread_CountPipeline() { s_pipelines.fetch_add(1, std::memory_order_relaxed); }
+
+namespace
+{
 	void* MemoryMonitorMain(void*)
 	{
 		const time_t start = time(nullptr);
@@ -123,12 +133,12 @@ namespace
 			const struct mallinfo allocator = mallinfo();
 			if (FILE* file = std::fopen("sdmc:/switch/cemu/memlog.txt", "a"))
 			{
-				std::fprintf(file, "t=%llds free=%lluMB lowest_free=%lluMB used=%lluMB malloc_in_use=%dMB malloc_arena=%dMB\n",
+				std::fprintf(file, "t=%llds free=%lluMB lowest_free=%lluMB used=%lluMB malloc_in_use=%dMB malloc_arena=%dMB shaders=%u pipelines=%u\n",
 				             static_cast<long long>(time(nullptr) - start),
 				             static_cast<unsigned long long>(memoryFree >> 20),
 				             static_cast<unsigned long long>(lowestFree >> 20),
 				             static_cast<unsigned long long>(memoryUsed >> 20), allocator.uordblks >> 20,
-				             allocator.arena >> 20);
+				             allocator.arena >> 20, s_shaderModules.load(), s_pipelines.load());
 				std::fclose(file);
 			}
 			svcSleepThread(5ull * 1000ull * 1000ull * 1000ull);

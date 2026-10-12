@@ -998,6 +998,9 @@ bool PipelineCompiler::Compile(bool forceCompile, bool isRenderThread, bool show
 		std::shared_lock lock(vkRenderer->m_pipeline_cache_save_mutex);
 		result = vkCreateGraphicsPipelines(vkRenderer->m_logicalDevice, vkRenderer->m_pipeline_cache, 1, &pipelineInfo, nullptr, &pipeline);
 		lock.unlock();
+#if defined(__SWITCH__)
+		SwitchThread_CountPipeline();
+#endif
 		if (result != VK_ERROR_OUT_OF_DEVICE_MEMORY)
 			break;
 		retryCount++;

@@ -22,3 +22,7 @@ void SwitchThread_ReportCreateFailure(const char* what, int errorCode);
 // state to sdmc:/switch/cemu/memlog.txt every few seconds (the file is rewritten at start).
 // It never throws and silently does nothing when the thread cannot be created.
 void SwitchThread_StartMemoryMonitor();
+
+// Counters printed in memlog.txt to see whether memory growth follows shader/pipeline compiles.
+void SwitchThread_CountShaderModule();
+void SwitchThread_CountPipeline();
