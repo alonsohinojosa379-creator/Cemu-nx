@@ -609,6 +609,24 @@ private:
 	std::shared_mutex m_pipeline_cache_save_mutex;
 	std::thread m_pipeline_cache_save_thread;
 	VkPipelineCache m_pipeline_cache{ nullptr };
+public:
+	// On Switch the driver's VkPipelineCache keeps a host-memory copy of every compiled shader, which
+	// adds up to hundreds of MB. When sdmc:/switch/cemu/no_pipeline_cache.txt exists, pipelines are
+	// created without it (Cemu has its own on-disk pipeline cache anyway).
+	VkPipelineCache GetPipelineCacheForCreate() const
+	{
+#if defined(__SWITCH__)
+		static const bool s_disabled = []() {
+			FILE* f = fopen("sdmc:/switch/cemu/no_pipeline_cache.txt", "rb");
+			if (f) fclose(f);
+			return f != nullptr;
+		}();
+		if (s_disabled)
+			return VK_NULL_HANDLE;
+#endif
+		return m_pipeline_cache;
+	}
+private:
 	std::unordered_map<uint64, VkPipeline> m_backbufferBlitPipelineCache;
 	std::unordered_map<uint64, VkDescriptorSet> m_backbufferBlitDescriptorSetCache;
 	VkPipelineLayout m_pipelineLayout{nullptr};

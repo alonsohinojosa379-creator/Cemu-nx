@@ -2993,7 +2993,7 @@ VkPipeline VulkanRenderer::backbufferBlit_createGraphicsPipeline(VkDescriptorSet
 
 	VkPipeline pipeline = nullptr;
 	std::shared_lock lock(m_pipeline_cache_save_mutex);
-	result = vkCreateGraphicsPipelines(m_logicalDevice, m_pipeline_cache, 1, &pipelineInfo, nullptr, &pipeline);
+	result = vkCreateGraphicsPipelines(m_logicalDevice, GetPipelineCacheForCreate(), 1, &pipelineInfo, nullptr, &pipeline);
 	if (result != VK_SUCCESS)
 	{
 		cemuLog_log(LogType::Force, "Failed to create graphics pipeline. Error {}", result);

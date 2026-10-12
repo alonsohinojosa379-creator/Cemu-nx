@@ -996,7 +996,7 @@ bool PipelineCompiler::Compile(bool forceCompile, bool isRenderThread, bool show
 	while (retryCount < 3)
 	{
 		std::shared_lock lock(vkRenderer->m_pipeline_cache_save_mutex);
-		result = vkCreateGraphicsPipelines(vkRenderer->m_logicalDevice, vkRenderer->m_pipeline_cache, 1, &pipelineInfo, nullptr, &pipeline);
+		result = vkCreateGraphicsPipelines(vkRenderer->m_logicalDevice, vkRenderer->GetPipelineCacheForCreate(), 1, &pipelineInfo, nullptr, &pipeline);
 		lock.unlock();
 #if defined(__SWITCH__)
 		SwitchThread_CountPipeline();

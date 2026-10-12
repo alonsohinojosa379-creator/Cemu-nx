@@ -435,7 +435,7 @@ CopySurfacePipelineInfo* VulkanRenderer::copySurface_getOrCreateGraphicsPipeline
 	copyPipeline->vkObjPipeline = vkObjPipeline;
 
 	VkPipeline pipeline = VK_NULL_HANDLE;
-	result = vkCreateGraphicsPipelines(m_logicalDevice, m_pipeline_cache, 1, &pipelineInfo, nullptr, &pipeline);
+	result = vkCreateGraphicsPipelines(m_logicalDevice, GetPipelineCacheForCreate(), 1, &pipelineInfo, nullptr, &pipeline);
 	if (result != VK_SUCCESS)
 	{
 		copyPipeline->vkObjPipeline->SetPipeline(nullptr);
