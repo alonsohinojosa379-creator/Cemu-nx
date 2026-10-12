@@ -199,6 +199,37 @@ namespace
 					}
 				}
 			}
+			// real clocks and SoC temperature (tells whether the overclock profile is applied / throttling)
+			{
+				static bool clkInit = false, clkOk = false, tsOk = false;
+				static ClkrstSession sCpu, sGpu, sEmc;
+				if (!clkInit)
+				{
+					clkInit = true;
+					if (hosversionAtLeast(8, 0, 0) && R_SUCCEEDED(clkrstInitialize()))
+					{
+						clkOk = R_SUCCEEDED(clkrstOpenSession(&sCpu, PcvModuleId_CpuBus, 3)) &&
+						        R_SUCCEEDED(clkrstOpenSession(&sGpu, PcvModuleId_GPU, 3)) &&
+						        R_SUCCEEDED(clkrstOpenSession(&sEmc, PcvModuleId_EMC, 3));
+					}
+					tsOk = R_SUCCEEDED(tsInitialize());
+				}
+				u32 cpuHz = 0, gpuHz = 0, emcHz = 0;
+				s32 socC = 0;
+				if (clkOk)
+				{
+					clkrstGetClockRate(&sCpu, &cpuHz);
+					clkrstGetClockRate(&sGpu, &gpuHz);
+					clkrstGetClockRate(&sEmc, &emcHz);
+				}
+				if (tsOk)
+					tsGetTemperature(TsLocation_External, &socC);
+				if (FILE* file = std::fopen("sdmc:/switch/cemu/memlog.txt", "a"))
+				{
+					std::fprintf(file, "  clk: cpu=%uMHz gpu=%uMHz ram=%uMHz soc=%dC\n", cpuHz / 1000000, gpuHz / 1000000, emcHz / 1000000, socC);
+					std::fclose(file);
+				}
+			}
 			svcSleepThread(5ull * 1000ull * 1000ull * 1000ull);
 		}
 		return nullptr;
