@@ -8158,6 +8158,27 @@ static bool holdingSettingsCombo() {
   return false;
 }
 
+// A HOME shortcut waits a few seconds on a small screen: pressing any button (or touching the
+// screen) opens the whole launcher instead of starting the game. Does not depend on reading the
+// pad state at the first instant, which is not reliable right after the HOME Menu hands over.
+static bool shortcutGraceOpensLauncher(){
+  const Uint32 until=SDL_GetTicks()+3000;
+  while(!SDL_TICKS_PASSED(SDL_GetTicks(),until)){
+    if(!beginUiFrame()) return false;
+    SDL_Event e;
+    while(pollUiEvent(e)){
+      if(e.type==SDL_CONTROLLERBUTTONDOWN||e.type==SDL_FINGERDOWN||e.type==SDL_MOUSEBUTTONDOWN) return true;
+    }
+    SDL_SetRenderDrawColor(g_ren,0,0,0,255);
+    SDL_RenderClear(g_ren);
+    drawTextC(g_font_big,SW/2,SH/2-50,LauncherLocalization::Translate("Starting the game...").data(),COL_TXT);
+    drawTextC(g_font,SW/2,SH/2+20,LauncherLocalization::Translate("Press any button or touch the screen to open the launcher").data(),COL_TXT);
+    SDL_RenderPresent(g_ren);
+    SDL_Delay(16);
+  }
+  return false;
+}
+
 int main(int argc, char **argv){
   if(argc>=1 && argv[0] && argv[0][0]){
     g_forwarderSelfPath=argv[0];
@@ -8571,7 +8592,8 @@ int main(int argc, char **argv){
 
   bool forwarderRequested=false,forwarderMatched=false;
   std::string forwarderKey;
-  for(int ai=(allowShortcutAutolaunch&&!settingsComboHeld)?1:argc; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
+  const bool graceOpenLauncher=allowShortcutAutolaunch&&!settingsComboHeld&&startedFromShortcut&&shortcutGraceOpensLauncher();
+  for(int ai=(allowShortcutAutolaunch&&!settingsComboHeld&&!graceOpenLauncher)?1:argc; ai+1<argc; ai++) if(strcmp(argv[ai],"-g")==0){
     forwarderRequested=true;
     forwarderKey=argv[ai+1];
     splitLaunchModeKey(forwarderKey);
