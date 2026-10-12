@@ -11,6 +11,10 @@
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 #if defined(__SWITCH__)
 #include "platform/switch/SwitchGpuCapture.h"
+#if defined(__SWITCH__)
+#include "platform/switch/SwitchThread.h"
+#endif
+#include <algorithm>
 #endif
 #include "Cafe/OS/libs/gx2/GX2.h"
 #include "imgui/imgui_impl_vulkan.h"
@@ -185,6 +189,67 @@ void VulkanRenderer::unregisterGraphicsPipeline(PipelineInfo* pipelineInfo)
 		if (removedFromCache)
 			break;
 	}
+	if (removedFromCache && m_numPipelines > 0)
+		m_numPipelines--;
+}
+
+// Switch: bound host memory by recycling least-recently-used pipelines (each costs ~0.65MB of host heap)
+void VulkanRenderer::EvictOldPipelines()
+{
+#if defined(__SWITCH__)
+	static const size_t s_cap = []() -> size_t {
+		size_t cap = 4700;
+		FILE* f = fopen("sdmc:/switch/cemu/pipeline_cap.txt", "rb");
+		if (f)
+		{
+			unsigned v = 0;
+			if (fscanf(f, "%u", &v) == 1)
+				cap = v; // 0 disables
+			fclose(f);
+		}
+		return cap;
+	}();
+	if (s_cap == 0 || m_numPipelines <= s_cap)
+		return;
+	const uint64 minAge = 2000; // never evict pipelines used in the last N draws
+	struct Cand { uint64 last; PipelineInfo* p; };
+	std::vector<Cand> cands;
+	cands.reserve(m_numPipelines);
+	for (auto& top : m_pipeline_info_cache)
+	{
+		for (auto& sub : top.second)
+		{
+			PipelineInfo* pi = sub.second;
+			if (pi == m_state.activePipelineInfo)
+				continue;
+			if (m_state.activeVertexDS && m_state.activeVertexDS->pipeline_info == pi)
+				continue;
+			if (m_state.activePixelDS && m_state.activePixelDS->pipeline_info == pi)
+				continue;
+			if (m_state.activeGeometryDS && m_state.activeGeometryDS->pipeline_info == pi)
+				continue;
+			if (!pi->m_vkrObjPipeline || pi->m_vkrObjPipeline->GetPipeline() == VK_NULL_HANDLE)
+				continue; // still compiling / invalid
+			if (pi->lastUsedDraw + minAge > m_pipelineUseCounter)
+				continue;
+			cands.push_back({ pi->lastUsedDraw, pi });
+		}
+	}
+	size_t toEvict = (m_numPipelines - s_cap) + 64; // batch to amortize the scan
+	if (toEvict > cands.size())
+		toEvict = cands.size();
+	if (toEvict == 0)
+		return;
+	std::nth_element(cands.begin(), cands.begin() + (toEvict - 1), cands.end(), [](const Cand& a, const Cand& b) { return a.last < b.last; });
+	for (size_t i = 0; i < toEvict; i++)
+	{
+		PipelineInfo* pi = cands[i].p;
+		if (m_state.currentPipeline == pi->m_vkrObjPipeline->GetPipeline())
+			m_state.currentPipeline = VK_NULL_HANDLE;
+		delete pi;
+		SwitchThread_CountEviction();
+	}
+#endif
 }
 
 // make a guess if a pipeline is not essential
@@ -235,6 +300,7 @@ PipelineInfo* VulkanRenderer::draw_createGraphicsPipeline(uint32 indexCount)
 	auto it = m_pipeline_info_cache.emplace(vsBaseHash, robin_hood::unordered_flat_map<uint64, PipelineInfo*>());
 	auto& cache_map = it.first->second;
 	cache_map.emplace(pipelineHash, pipelineInfo);
+	m_numPipelines++;
 
 	// init pipeline compiler
 	PipelineCompiler* pipelineCompiler = new PipelineCompiler();
@@ -273,9 +339,11 @@ PipelineInfo* VulkanRenderer::draw_createGraphicsPipeline(uint32 indexCount)
 
 PipelineInfo* VulkanRenderer::draw_getOrCreateGraphicsPipeline(uint32 indexCount)
 {
+	m_pipelineUseCounter++;
 	auto cache_object = draw_getCachedPipeline();
 	if (cache_object != nullptr)
 	{
+		cache_object->lastUsedDraw = m_pipelineUseCounter;
 
 #ifdef CEMU_DEBUG_ASSERT
 		cemu_assert_debug(cache_object->vertexShader == LatteSHRC_GetActiveVertexShader());
@@ -296,7 +364,10 @@ PipelineInfo* VulkanRenderer::draw_getOrCreateGraphicsPipeline(uint32 indexCount
 	}
 	//draw_debugPipelineHashState();
 
-	return draw_createGraphicsPipeline(indexCount);
+	EvictOldPipelines();
+	auto created = draw_createGraphicsPipeline(indexCount);
+	created->lastUsedDraw = m_pipelineUseCounter;
+	return created;
 }
 
 Renderer::IndexAllocation VulkanRenderer::indexData_reserveIndexMemory(uint32 size)

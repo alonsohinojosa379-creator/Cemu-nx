@@ -26,3 +26,4 @@ void SwitchThread_StartMemoryMonitor();
 // Counters printed in memlog.txt to see whether memory growth follows shader/pipeline compiles.
 void SwitchThread_CountShaderModule();
 void SwitchThread_CountPipeline();
+void SwitchThread_CountEviction();

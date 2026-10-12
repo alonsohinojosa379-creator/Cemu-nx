@@ -114,6 +114,7 @@ public:
 
 	uint64 minimalStateHash;
 	uint64 stateHash;
+	uint64 lastUsedDraw{ 0 };
 
 	bool usesBlendConstants{ false };
 	bool usesDepthBias{ false };
@@ -354,6 +355,9 @@ public:
 	// externally callable
 	void GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isDepth, Latte::E_DIM dim, sint32 width, sint32 height, FormatInfoVK* formatInfoOut);
 	void unregisterGraphicsPipeline(PipelineInfo* pipelineInfo);
+	void EvictOldPipelines();
+	uint64 m_pipelineUseCounter{ 0 };
+	size_t m_numPipelines{ 0 };
 
 private:
 	struct VkRendererState
