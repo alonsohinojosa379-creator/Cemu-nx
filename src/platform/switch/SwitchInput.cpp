@@ -138,9 +138,9 @@ class SwitchGamepadController : public ControllerBase
 		const uint64_t b = padGetButtons(&m_pad);
 		{
 			// Diagnostics: shows whether the Switch pad reaches the emulator at all (first 80 changes).
-			static uint64_t s_lastButtons = ~0ull;
-			static int s_lastConnected = -1;
-			static int s_logged = 0;
+			uint64_t& s_lastButtons = m_dbgLastButtons;
+			int& s_lastConnected = m_dbgLastConnected;
+			int& s_logged = m_dbgLogged;
 			if (s_logged < 80 && (s_lastButtons != b || s_lastConnected != (m_connected ? 1 : 0)))
 			{
 				s_lastButtons = b;
@@ -461,6 +461,9 @@ class SwitchGamepadController : public ControllerBase
 
 	PadState m_pad{};
 	HidNpadIdType m_npadId;
+	uint64_t m_dbgLastButtons = ~0ull;
+	int m_dbgLastConnected = -1;
+	int m_dbgLogged = 0;
 	bool m_useHandheld = false;
 	bool m_hasTouch = false;
 	bool m_enableMotion = false;

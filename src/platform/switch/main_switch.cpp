@@ -344,7 +344,11 @@ static bool SwitchPlatformInit()
 	s_romfsMounted = R_SUCCEEDED(romfsInit());
 	s_hidInitialized = R_SUCCEEDED(hidInitialize());
 	if (s_hidInitialized)
+	{
 		padConfigureInput(8, HidNpadStyleSet_NpadStandard);
+		// A single Joy-Con held sideways: stick -> left stick, SL/SR -> L/R (second player).
+		hidSetNpadJoyHoldType(HidNpadJoyHoldType_Horizontal);
+	}
 	s_socketInitialized = R_SUCCEEDED(socketInitializeDefault());
 	SwitchStorage::InitializeFromConfig("sdmc:/switch/cemu/launcher.ini", true, nullptr,
 	                                    ReadLaunchGamePath());
