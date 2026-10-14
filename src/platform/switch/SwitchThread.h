@@ -28,3 +28,26 @@ void SwitchThread_CountShaderModule();
 void SwitchThread_CountPipeline();
 void SwitchThread_CountEviction();
 void SwitchThread_RegisterCurrentThread(const char* name);
+
+// Lightweight section timers (Switch diagnostics). Totals are printed in memlog.txt as "prof(ms per s)".
+enum SwitchProfSection
+{
+	kProfDraw = 0,
+	kProfDescriptorSets,
+	kProfSurfaceSync,
+	kProfSubmit,
+	kProfWaitCmdBuf,
+	kProfSwap,
+	kProfSequence,
+	kProfRenderPass,
+	kProfCount
+};
+void SwitchProf_Add(int section, uint64_t ticks);
+uint64_t SwitchProf_Now();
+struct SwitchProfScope
+{
+	int section;
+	uint64_t t0;
+	explicit SwitchProfScope(int s) : section(s), t0(SwitchProf_Now()) {}
+	~SwitchProfScope() { SwitchProf_Add(section, SwitchProf_Now() - t0); }
+};

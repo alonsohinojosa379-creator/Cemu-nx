@@ -2256,6 +2256,7 @@ void VulkanRenderer::ProcessFinishedCommandBuffers()
 
 void VulkanRenderer::WaitForNextFinishedCommandBuffer()
 {
+	SwitchProfScope prof_(kProfWaitCmdBuf);
 	cemu_assert_debug(m_commandBufferSyncIndex != m_commandBufferIndex);
 	// wait on least recently submitted command buffer
 	VkResult result = vkWaitForFences(m_logicalDevice, 1, &m_cmdBufferFences[m_commandBufferSyncIndex], true, UINT64_MAX);
@@ -2273,6 +2274,7 @@ void VulkanRenderer::WaitForNextFinishedCommandBuffer()
 
 void VulkanRenderer::SubmitCommandBuffer(VkSemaphore signalSemaphore, VkSemaphore waitSemaphore)
 {
+	SwitchProfScope prof_(kProfSubmit);
 	draw_endRenderPass();
 
 	occlusionQuery_notifyEndCommandBuffer();
@@ -2383,6 +2385,7 @@ bool VulkanRenderer::HasCommandBufferFinished(uint64 commandBufferId) const
 
 void VulkanRenderer::WaitCommandBufferFinished(uint64 commandBufferId)
 {
+	SwitchProfScope prof_(kProfWaitCmdBuf);
 	if (commandBufferId == m_numSubmittedCmdBuffers)
 		SubmitCommandBuffer();
 	while (HasCommandBufferFinished(commandBufferId) == false)
@@ -3240,6 +3243,7 @@ void VulkanBenchmarkPrintResults();
 
 void VulkanRenderer::SwapBuffers(bool swapTV, bool swapDRC)
 {
+	SwitchProfScope prof_(kProfSwap);
 #if defined(__SWITCH__)
 	if (HandleSwitchAppletSuspension())
 		return;

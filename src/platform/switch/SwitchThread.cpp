@@ -142,6 +142,14 @@ void SwitchThread_RegisterCurrentThread(const char* name)
 	std::atomic_thread_fence(std::memory_order_release);
 }
 
+namespace
+{
+	std::atomic<uint64_t> s_profTicks[kProfCount];
+	const char* const kProfNames[kProfCount] = {"draw", "descSets", "surfSync", "submit", "waitCB", "swap", "sequence", "renderPass"};
+}
+uint64_t SwitchProf_Now() { return armGetSystemTick(); }
+void SwitchProf_Add(int section, uint64_t ticks) { s_profTicks[section].fetch_add(ticks, std::memory_order_relaxed); }
+
 void SwitchThread_CountShaderModule() { s_shaderModules.fetch_add(1, std::memory_order_relaxed); }
 void SwitchThread_CountEviction() { s_evicted.fetch_add(1, std::memory_order_relaxed); }
 void SwitchThread_CountPipeline() { s_pipelines.fetch_add(1, std::memory_order_relaxed); }
@@ -193,6 +201,30 @@ namespace
 							const unsigned pct = static_cast<unsigned>(delta * 100 / dt);
 							if (pct >= 3)
 								std::fprintf(file, " %s=%u", s_profThreads[i].name, pct);
+						}
+						std::fprintf(file, "\n");
+						std::fclose(file);
+					}
+				}
+			}
+			// time spent in the renderer sections (milliseconds per second of wall time)
+			{
+				static u64 lastProfTick = 0;
+				static uint64_t lastProf[kProfCount] = {};
+				const u64 nowTick = armGetSystemTick();
+				const u64 dt = lastProfTick ? nowTick - lastProfTick : 0;
+				lastProfTick = nowTick;
+				if (dt)
+				{
+					if (FILE* file = std::fopen("sdmc:/switch/cemu/memlog.txt", "a"))
+					{
+						std::fprintf(file, "  prof(ms/s):");
+						for (int i = 0; i < kProfCount; i++)
+						{
+							const uint64_t total = s_profTicks[i].load(std::memory_order_relaxed);
+							const uint64_t delta = total - lastProf[i];
+							lastProf[i] = total;
+							std::fprintf(file, " %s=%u", kProfNames[i], static_cast<unsigned>(delta * 1000 / dt));
 						}
 						std::fprintf(file, "\n");
 						std::fclose(file);

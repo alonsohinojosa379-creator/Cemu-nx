@@ -1072,6 +1072,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 
 void VulkanRenderer::SurfaceSync(Latte::E_COHER_CNTL coher, MPTR address, uint32 size)
 {
+	SwitchProfScope prof_(kProfSurfaceSync);
 	if (static_cast<uint32>(coher & Latte::E_COHER_CNTL::CB_ALL_DEST_BASE_ENA) != 0)
 		m_state.colorBufferSyncPending = true;
 }
@@ -1221,6 +1222,7 @@ void VulkanRenderer::sync_RenderPassStoreTextures(CachedFBOVk* fboVk)
 
 void VulkanRenderer::draw_prepareDescriptorSets(PipelineInfo* pipeline_info, VkDescriptorSetInfo*& vertexDS, VkDescriptorSetInfo*& pixelDS, VkDescriptorSetInfo*& geometryDS)
 {
+	SwitchProfScope prof_(kProfDescriptorSets);
 	const auto vertexShader = LatteSHRC_GetActiveVertexShader();
 	const auto geometryShader = LatteSHRC_GetActiveGeometryShader();
 	const auto pixelShader = LatteSHRC_GetActivePixelShader();
@@ -1273,6 +1275,7 @@ bool s_syncOnNextDraw = false;
 
 void VulkanRenderer::draw_setRenderPass()
 {
+	SwitchProfScope prof_(kProfRenderPass);
 	CachedFBOVk* fboVk = m_state.activeFBO;
 	// note - vertex/geometry self dependency needs renderpass split
 
@@ -1341,6 +1344,7 @@ void VulkanRenderer::draw_setRenderPass()
 
 void VulkanRenderer::draw_endRenderPass()
 {
+	SwitchProfScope prof_(kProfRenderPass);
 	if (!m_state.activeRenderpassFBO)
 		return;
 	if (m_featureControl.deviceExtensions.dynamic_rendering)
@@ -1374,6 +1378,7 @@ void VulkanRenderer::draw_handleSpecialState5()
 
 void VulkanRenderer::draw_beginSequence()
 {
+	SwitchProfScope prof_(kProfSequence);
 	m_state.drawSequenceSkip = false;
 
 	bool streamoutEnable = LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] != 0;
@@ -1831,6 +1836,7 @@ void VulkanRenderer::draw_execute_continued(uint32 baseVertex, uint32 baseInstan
 
 void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, const LatteDrawcallContext& drawcallContext)
 {
+	SwitchProfScope prof_(kProfDraw);
 	if (drawcallContext.isFirst)
 		draw_execute_first(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType, drawcallContext);
 	else
@@ -1950,6 +1956,7 @@ bool VulkanRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader
 
 void VulkanRenderer::draw_endSequence()
 {
+	SwitchProfScope prof_(kProfSequence);
 	LatteDecompilerShader* pixelShader = LatteSHRC_GetActivePixelShader();
 	// post-drawcall logic
 	if (pixelShader)
