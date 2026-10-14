@@ -220,6 +220,19 @@ namespace GX2
 		bool forceFullSync = false;
 		if (g_renderer && g_renderer->GetType() == RendererAPI::Vulkan)
 			forceFullSync = true;
+#if defined(__SWITCH__)
+		// experiment: sdmc:/switch/cemu/no_gx2_sync.txt present -> do not force the CPU to wait for the GPU here
+		static const bool s_noSync = []() {
+			FILE* f = fopen("sdmc:/switch/cemu/no_gx2_sync.txt", "rb");
+			if (!f)
+				return false;
+			fclose(f);
+			cemuLog_log(LogType::Force, "Switch: GX2DrawDone full sync DISABLED (no_gx2_sync.txt)");
+			return true;
+		}();
+		if (s_noSync)
+			forceFullSync = false;
+#endif
 		if (forceFullSync || ActiveSettings::WaitForGX2DrawDoneEnabled())
 		{
 			GX2ReserveCmdSpace(2);
