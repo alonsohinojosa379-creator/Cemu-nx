@@ -306,19 +306,10 @@ void padscoreExport_KPADGetUnifiedWpadStatus(PPCInterpreter_t* hCPU)
 
 		if (const auto controller = InputManager::instance().get_wpad_controller(channel))
 		{
-			switch (controller->get_data_format())
-			{
-			case WPAD_FMT_CORE:
-			case WPAD_FMT_CORE_ACC:
-			case WPAD_FMT_CORE_ACC_DPD:
-			{
-				status->fmt = controller->get_data_format();
-				controller->WPADRead(&status->u.core);
-				break;
-			}
-			default:
-				debugBreakpoint();
-			}
+			// WPADRead() fills the right extension layout (core/freestyle/classic/pro) for the current
+			// data format, so every format can be reported (Pro/Classic used to be left zeroed).
+			status->fmt = controller->get_data_format();
+			controller->WPADRead(&status->u.core);
 		}
 		else
 		{
