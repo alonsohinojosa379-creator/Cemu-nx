@@ -474,6 +474,26 @@ sint32 _KPADRead(uint32 channel, KPADStatus_t* samplingBufs, uint32 length, bety
 	{
 		const auto btn_repeat = padscore::g_padscore.controller_data[channel].btn_repeat;
 		controller->KPADRead(*samplingBufs, btn_repeat);
+#if defined(__SWITCH__)
+		{
+			// Diagnostics: what the game actually reads on each WPAD channel (first reads + every change).
+			static uint32 s_diagCount[InputManager::kMaxWPADControllers] = {};
+			static uint32 s_diagHold[InputManager::kMaxWPADControllers] = {};
+			static uint32 s_diagCl[InputManager::kMaxWPADControllers] = {};
+			static uint32 s_diagLogged[InputManager::kMaxWPADControllers] = {};
+			const uint32 hold = samplingBufs->hold;
+			const uint32 cl = samplingBufs->ex_status.cl.hold;
+			if (s_diagCount[channel]++ < 3 || ((s_diagHold[channel] != hold || s_diagCl[channel] != cl) && s_diagLogged[channel] < 120))
+			{
+				s_diagLogged[channel]++;
+				cemuLog_log(LogType::Force, "KPADRead ch={} dev=0x{:02x} fmt={} hold=0x{:08x} cl.hold=0x{:08x} lx={:.2f} ly={:.2f}",
+					channel, (uint32)samplingBufs->devType, (uint32)samplingBufs->data_format, hold, cl,
+					(float)samplingBufs->ex_status.cl.lstick.x, (float)samplingBufs->ex_status.cl.lstick.y);
+			}
+			s_diagHold[channel] = hold;
+			s_diagCl[channel] = cl;
+		}
+#endif
 	}
 
 	if (errResult)
