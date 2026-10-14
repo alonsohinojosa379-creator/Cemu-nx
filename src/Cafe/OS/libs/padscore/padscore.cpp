@@ -38,6 +38,13 @@ enum class WPADLed : uint8
 	CHAN3 = (1 << 3),
 };
 
+#if defined(__SWITCH__)
+// Diagnostics: log what the game asks of the pad API (first 40 calls per call site).
+#define PADAPI_LOG(...) do { static int s_n = 0; if (s_n++ < 40) cemuLog_log(LogType::Force, "padapi " __VA_ARGS__); } while (0)
+#else
+#define PADAPI_LOG(...) cemuLog_log(LogType::InputAPI, __VA_ARGS__)
+#endif
+
 namespace padscore 
 {
 	enum WPADState_t
@@ -80,14 +87,14 @@ namespace padscore
 
 void padscoreExport_WPADGetStatus(PPCInterpreter_t* hCPU)
 {
-	cemuLog_log(LogType::InputAPI, "WPADGetStatus()");
+	PADAPI_LOG("WPADGetStatus()");
 	uint32 status = 1;
 	osLib_returnFromFunction(hCPU, status);
 }
 
 void padscoreExport_WPADGetBatteryLevel(PPCInterpreter_t* hCPU)
 {
-	cemuLog_log(LogType::InputAPI, "WPADGetBatteryLevel()");
+	PADAPI_LOG("WPADGetBatteryLevel()");
 	osLib_returnFromFunction(hCPU, (uint32)WPADBatteryLevel::FULL);
 }
 
@@ -96,7 +103,7 @@ void padscoreExport_WPADProbe(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamPtr(type, uint32be, 1);
 
-	cemuLog_log(LogType::InputAPI, "WPADProbe({})", channel);
+	PADAPI_LOG("WPADProbe({})", channel);
 
 	if(const auto controller = InputManager::instance().get_wpad_controller(channel))
 	{
@@ -134,7 +141,7 @@ void padscoreExport_WPADGetInfoAsync(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamStructPtr(wpadInfo, WPADInfo_t, 1);
 	ppcDefineParamMPTR(callbackFunc, 2);
-	cemuLog_log(LogType::InputAPI, "WPADGetInfoAsync({}, 0x{:08x}, 0x{:08x})", channel, memory_getVirtualOffsetFromPointer(wpadInfo), callbackFunc);
+	PADAPI_LOG("WPADGetInfoAsync({}, 0x{:08x}, 0x{:08x})", channel, memory_getVirtualOffsetFromPointer(wpadInfo), callbackFunc);
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -170,7 +177,7 @@ void padscoreExport_WPADRead(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamPtr(wpadStatus, WPADStatus_t, 1);
-	cemuLog_log(LogType::InputAPI, "WPADRead({}, {:x})", channel, memory_getVirtualOffsetFromPointer(wpadStatus));
+	PADAPI_LOG("WPADRead({}, {:x})", channel, memory_getVirtualOffsetFromPointer(wpadStatus));
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -190,7 +197,7 @@ void padscoreExport_WPADSetDataFormat(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamU32(fmt, 1);
-	cemuLog_log(LogType::InputAPI, "WPADSetDataFormat({}, {})", channel, fmt);
+	PADAPI_LOG("WPADSetDataFormat({}, {})", channel, fmt);
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -204,7 +211,7 @@ void padscoreExport_WPADSetDataFormat(PPCInterpreter_t* hCPU)
 void padscoreExport_WPADGetDataFormat(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32(channel, 0);
-	cemuLog_log(LogType::InputAPI, "WPADGetDataFormat({})", channel);
+	PADAPI_LOG("WPADGetDataFormat({})", channel);
 
 	sint32 dataFormat = kDataFormat_CORE;
 	if (channel < InputManager::kMaxWPADControllers)
@@ -224,7 +231,7 @@ void padscoreExport_WPADGetInfo(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamStructPtr(wpadInfo, WPADInfo_t, 1);
-	cemuLog_log(LogType::InputAPI, "WPADGetInfo({}, 0x{:08x})", channel, memory_getVirtualOffsetFromPointer(wpadInfo));
+	PADAPI_LOG("WPADGetInfo({}, 0x{:08x})", channel, memory_getVirtualOffsetFromPointer(wpadInfo));
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -253,7 +260,7 @@ void padscoreExport_WPADGetInfo(PPCInterpreter_t* hCPU)
 
 void padscoreExport_WPADIsMotorEnabled(PPCInterpreter_t* hCPU)
 {
-	cemuLog_log(LogType::InputAPI, "WPADIsMotorEnabled()");
+	PADAPI_LOG("WPADIsMotorEnabled()");
 	osLib_returnFromFunction(hCPU, TRUE);
 }
 
@@ -261,7 +268,7 @@ void padscoreExport_WPADControlMotor(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamU32(command, 1);
-	cemuLog_log(LogType::InputAPI, "WPADControlMotor({}, {})", channel, command);
+	PADAPI_LOG("WPADControlMotor({}, {})", channel, command);
 	
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -291,7 +298,7 @@ void padscoreExport_KPADGetUnifiedWpadStatus(PPCInterpreter_t* hCPU)
 	ppcDefineParamPtr(status, KPADUnifiedWpadStatus_t, 1);
 	ppcDefineParamU32(count, 2);
 
-	cemuLog_log(LogType::InputAPI, "KPADGetUnifiedWpadStatus({}, 0x{:08x}, 0x{:x})", channel, MEMPTR<void>(status).GetMPTR(), count);
+	PADAPI_LOG("KPADGetUnifiedWpadStatus({}, 0x{:08x}, 0x{:x})", channel, MEMPTR<void>(status).GetMPTR(), count);
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -331,7 +338,7 @@ void padscoreExport_KPADSetBtnRepeat(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	float delaySec = hCPU->fpr[1].fpr;
 	float pulseSec = hCPU->fpr[2].fpr;
-	cemuLog_log(LogType::InputAPI, "KPADSetBtnRepeat({}, {}, {})", channel, delaySec, pulseSec);
+	PADAPI_LOG("KPADSetBtnRepeat({}, {}, {})", channel, delaySec, pulseSec);
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -346,7 +353,7 @@ void padscoreExport_KPADSetSamplingCallback(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamMPTR(callback, 1);
 
-	cemuLog_log(LogType::InputAPI, "KPADSetSamplingCallback({}, 0x{:x})", channel, callback);
+	PADAPI_LOG("KPADSetSamplingCallback({}, 0x{:x})", channel, callback);
 
 	if (channel >= InputManager::kMaxWPADControllers)
 	{
@@ -366,7 +373,7 @@ void padscoreExport_WPADControlDpd(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(command, 1);
 	ppcDefineParamMPTR(callback, 2);
 
-	cemuLog_log(LogType::InputAPI, "WPADControlDpd({}, {}, 0x{:x})", channel, command, callback);
+	PADAPI_LOG("WPADControlDpd({}, {}, 0x{:x})", channel, command, callback);
 
 	if (channel < InputManager::kMaxWPADControllers)
 	{
@@ -391,7 +398,7 @@ void padscoreExport_WPADSetExtensionCallback(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamMPTR(callback, 1);
 
-	cemuLog_log(LogType::InputAPI, "WPADSetExtensionCallback({}, 0x{:x})", channel, callback);
+	PADAPI_LOG("WPADSetExtensionCallback({}, 0x{:x})", channel, callback);
 
 	if (channel >= InputManager::kMaxWPADControllers)
 	{
@@ -410,7 +417,7 @@ void padscoreExport_KPADSetConnectCallback(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamMPTR(callback, 1);
 
-	cemuLog_log(LogType::InputAPI, "KPADSetConnectCallback({}, 0x{:x})",channel, callback);
+	PADAPI_LOG("KPADSetConnectCallback({}, 0x{:x})",channel, callback);
 
 	if (channel >= InputManager::kMaxWPADControllers)
 	{
@@ -508,7 +515,7 @@ void padscoreExport_KPADReadEx(PPCInterpreter_t* hCPU)
 	ppcDefineParamPtr(kpadStatus, KPADStatus_t, 1);
 	ppcDefineParamU32(length, 2);
 	ppcDefineParamPtr(errResult, betype<KPAD_ERROR>, 3);
-	cemuLog_log(LogType::InputAPI, "KPADReadEx({}, 0x{:x})", channel, length);
+	PADAPI_LOG("KPADReadEx({}, 0x{:x})", channel, length);
 
 	sint32 samplesRead = _KPADRead(channel, kpadStatus, length, errResult);
 	osLib_returnFromFunction(hCPU, samplesRead);
@@ -519,7 +526,7 @@ void padscoreExport_KPADRead(PPCInterpreter_t* hCPU)
 	ppcDefineParamU32(channel, 0);
 	ppcDefineParamPtr(kpadStatus, KPADStatus_t, 1);
 	ppcDefineParamU32(length, 2);
-	cemuLog_log(LogType::InputAPI, "KPADRead({}, 0x{:x})", channel, length);
+	PADAPI_LOG("KPADRead({}, 0x{:x})", channel, length);
 
 	sint32 samplesRead = _KPADRead(channel, kpadStatus, length, nullptr);
 	osLib_returnFromFunction(hCPU, samplesRead);
@@ -539,7 +546,7 @@ namespace padscore
 	void export_KPADEnableDPD(PPCInterpreter_t* hCPU)
 	{
 		ppcDefineParamS32(channel, 0);
-		cemuLog_log(LogType::InputAPI, "KPADEnableDPD({})", channel);
+		PADAPI_LOG("KPADEnableDPD({})", channel);
 		cemu_assert_debug(0 <= channel && channel < InputManager::kMaxWPADControllers);
 
 		if(const auto controller = InputManager::instance().get_wpad_controller(channel))
@@ -554,7 +561,7 @@ namespace padscore
 
 	void export_KPADGetMplsWorkSize(PPCInterpreter_t* hCPU)
 	{
-		cemuLog_log(LogType::InputAPI, "KPADGetMplsWorkSize()");
+		PADAPI_LOG("KPADGetMplsWorkSize()");
 		osLib_returnFromFunction(hCPU, 0x5FE0);
 	}
 
@@ -577,7 +584,7 @@ namespace padscore
 
 	void export_KPADInit(PPCInterpreter_t* hCPU)
 	{
-		cemuLog_log(LogType::InputAPI, "KPADInit()");
+		PADAPI_LOG("KPADInit()");
 		KPADInitEx(nullptr, 0);
 		osLib_returnFromFunction(hCPU, 0);
 	}
@@ -586,7 +593,7 @@ namespace padscore
 	{
 		ppcDefineParamMEMPTR(ring_buffer, KPADUnifiedWpadStatus_t, 0);
 		ppcDefineParamU32(length, 1);
-		cemuLog_log(LogType::InputAPI, "KPADInitEx(0x{:08x}, 0x{:x})", ring_buffer.GetMPTR(), length);
+		PADAPI_LOG("KPADInitEx(0x{:08x}, 0x{:x})", ring_buffer.GetMPTR(), length);
 		KPADInitEx(ring_buffer.GetPtr(), length);
 		osLib_returnFromFunction(hCPU, 0);
 	}
@@ -599,14 +606,14 @@ namespace padscore
 	void export_WPADSetCallbackByKPAD(PPCInterpreter_t* hCPU)
 	{
 		ppcDefineParamU32(state, 0);
-		cemuLog_log(LogType::InputAPI, "WPADSetCallbackByKPAD({})", state);
+		PADAPI_LOG("WPADSetCallbackByKPAD({})", state);
 		WPADSetCallbackByKPAD(state);
 		osLib_returnFromFunction(hCPU, 0);
 	}
 
 	void export_KPADGetMaxControllers(PPCInterpreter_t* hCPU)
 	{
-		cemuLog_log(LogType::InputAPI, "KPADGetMaxControllers()");
+		PADAPI_LOG("KPADGetMaxControllers()");
 		sint32 max_controllers = g_padscore.max_controllers;
 		osLib_returnFromFunction(hCPU, max_controllers);
 	}
@@ -628,7 +635,7 @@ namespace padscore
 	void export_KPADSetMaxControllers(PPCInterpreter_t* hCPU)
 	{
 		ppcDefineParamU32(new_max_count, 0);
-		cemuLog_log(LogType::InputAPI, "KPADSetMaxControllers({})", new_max_count);
+		PADAPI_LOG("KPADSetMaxControllers({})", new_max_count);
 
 		if (new_max_count != kKPADMaxControllers && new_max_count != kWPADMaxControllers)
 		{
@@ -720,7 +727,7 @@ namespace padscore
 				if(!g_padscore.controller_data[i].disconnectCalled)
 				{
 					g_padscore.controller_data[i].disconnectCalled = true;
-					cemuLog_log(LogType::InputAPI, "Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NO_CONTROLLER);
+					PADAPI_LOG("Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NO_CONTROLLER);
 					PPCCoreCallback(g_padscore.controller_data[i].connectCallback, i, WPAD_ERR_NO_CONTROLLER);
 					continue;
 				}
@@ -731,14 +738,14 @@ namespace padscore
 					{
 						controller->m_status = WPADController::ConnectCallbackStatus::ReportConnect;
 
-						cemuLog_log(LogType::InputAPI, "Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NO_CONTROLLER);
+						PADAPI_LOG("Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NO_CONTROLLER);
 						PPCCoreCallback(g_padscore.controller_data[i].connectCallback, i, WPAD_ERR_NO_CONTROLLER);
 						
 					}
 					else if (controller->m_status == WPADController::ConnectCallbackStatus::ReportConnect) 
 					{
 						controller->m_status = WPADController::ConnectCallbackStatus::None;
-						cemuLog_log(LogType::InputAPI, "Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NONE);
+						PADAPI_LOG("Calling WPADConnectCallback({}, {})", i, WPAD_ERR_NONE);
 						PPCCoreCallback(g_padscore.controller_data[i].connectCallback, i, WPAD_ERR_NONE);
 					}
 				}
@@ -755,7 +762,7 @@ namespace padscore
 					if (controller->m_extension_status == WPADController::ConnectCallbackStatus::ReportConnect)
 					{
 						controller->m_extension_status = WPADController::ConnectCallbackStatus::None;
-						cemuLog_log(LogType::InputAPI, "Calling WPADextensionCallback({})", i);
+						PADAPI_LOG("Calling WPADextensionCallback({})", i);
 						PPCCoreCallback(g_padscore.controller_data[i].extension_callback, i, controller->get_device_type());
 					}
 				}
@@ -769,7 +776,7 @@ namespace padscore
 			{
 				if (const auto controller = instance.get_wpad_controller(i))
 				{
-					cemuLog_log(LogType::InputAPI, "Calling WPADsamplingCallback({})", i);
+					PADAPI_LOG("Calling WPADsamplingCallback({})", i);
 					PPCCoreCallback(g_padscore.controller_data[i].sampling_callback, i);
 				}
 			}

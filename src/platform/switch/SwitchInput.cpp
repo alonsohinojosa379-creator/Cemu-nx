@@ -684,10 +684,20 @@ bool ConfigureControllers(SwitchControllerType type)
 	auto playerOne = inputManager.set_controller(0, playerOneType);
 	if (!ConfigureMappings(playerOne, playerOneType, s_controllers[0]))
 		return false;
+	// Optional experiment: sdmc:/switch/cemu/extra_type.txt containing "Classic" makes players 2+ Classic Controllers.
+	EmulatedController::Type extraType = EmulatedController::Type::Pro;
+	if (FILE* f = fopen("sdmc:/switch/cemu/extra_type.txt", "r"))
+	{
+		char buf[16] = {};
+		if (fread(buf, 1, sizeof(buf) - 1, f) > 0 && strncmp(buf, "Classic", 7) == 0)
+			extraType = EmulatedController::Type::Classic;
+		fclose(f);
+	}
+	cemuLog_log(LogType::Force, "Switch input: extra players use {}", extraType == EmulatedController::Type::Classic ? "Classic" : "Pro");
 	for (size_t i = 1; i < configuredPlayers; ++i)
 	{
-		auto emu = inputManager.set_controller(i, EmulatedController::Type::Pro);
-		if (!ConfigureMappings(emu, EmulatedController::Type::Pro, s_controllers[i]))
+		auto emu = inputManager.set_controller(i, extraType);
+		if (!ConfigureMappings(emu, extraType, s_controllers[i]))
 			return false;
 	}
 
