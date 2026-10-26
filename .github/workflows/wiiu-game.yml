@@ -33,6 +33,7 @@ jobs:
           mkdir -p /tmp/extra
           cp cemu-games-extra/* /tmp/extra/
           cp blackops2-wiiu.patch /tmp/juego.patch
+          cp -r wiiu-gate /tmp/wiiu-gate
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
           echo "art=nro-$(echo "$GITHUB_REF_NAME" | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
@@ -46,6 +47,8 @@ jobs:
           git checkout --force FETCH_HEAD
           git am /tmp/juego.patch
           cp /tmp/extra/${{ steps.g.outputs.slug }}.conf /tmp/extra/${{ steps.g.outputs.slug }}.jpg cemu-games/
+          cp -r /tmp/wiiu-gate wiiu-gate
+          python3 wiiu-gate/apply.py
           git log -2 --oneline
 
       - name: Compilar
