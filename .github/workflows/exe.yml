@@ -15,9 +15,16 @@ jobs:
           node-version: 20
       - name: Compilar
         working-directory: exe
+        shell: bash
         run: |
-          npm install
-          npx electron-builder --win portable --x64 --publish never
+          set +e
+          (npm install && npx electron-builder --win portable --x64 --publish never) > build.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            msg=$(tail -n 25 build.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Fallo del build::$msg"
+            exit $rc
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: NXmasters-exe
