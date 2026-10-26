@@ -48,9 +48,9 @@ details summary{cursor:pointer;color:var(--mu);font-size:.9rem;margin-top:10px}
 <p class="mu">Se abre GitHub con los permisos <b>repo</b> y <b>workflow</b> marcados. Baja, pulsa <b>Generate token</b>, copia el código ghp_ y pégalo aquí. Solo se guarda en este navegador.</p>
 <label for="tok">Token</label>
 <input id="tok" type="password" autocomplete="off" placeholder="ghp_...">
-<label for="repo">Tu repo de compilaciones (se crea solo, privado y en TU cuenta)</label>
+<label for="repo">Tu repo de compilaciones (se crea solo en TU cuenta)</label>
 <input id="repo" type="text" placeholder="se llenará solo: tu-usuario/nxmasters-builds">
-<p class="mu">No hace falta que nadie te invite: la primera vez la página crea ese repo en tu cuenta y compila ahí con tus propios minutos gratis de GitHub.</p>
+<p class="mu">No hace falta que nadie te invite: la primera vez la página crea ese repo en tu cuenta (público, así GitHub compila gratis y sin límite de minutos). No contiene tus juegos ni tu token.</p>
 <div class="row" style="margin-top:10px"><button id="bChk" class="sec">Guardar y comprobar</button><span id="chk" class="mu"></span></div>
 </section>
 
@@ -164,9 +164,9 @@ async function ensureRepo(){
   try{ await gh('GET','/repos/'+r); }
   catch(e){
     if(!/ 404 /.test(e.message)) throw e;
-    log('Creando tu repo privado '+r+' (solo la primera vez, ~1 min)...');
+    log('Creando tu repo '+r+' (solo la primera vez, ~1 min)...');
     const [own,name]=r.split('/');
-    await gh('POST','/repos/'+BASE+'/generate',{owner:own,name,private:true,description:'Compilaciones NX masters',include_all_branches:false});
+    await gh('POST','/repos/'+BASE+'/generate',{owner:own,name,private:false,description:'Compilaciones NX masters',include_all_branches:false});
     let ok=false;
     for(let i=0;i<30&&!ok;i++){ await esp(4000); try{ await gh('GET','/repos/'+r+'/contents/.github/workflows/build.yml'); ok=true; }catch(_){} }
     if(!ok) throw new Error('Se creó '+r+' pero aún no está listo. Espera un minuto y pulsa de nuevo.');
