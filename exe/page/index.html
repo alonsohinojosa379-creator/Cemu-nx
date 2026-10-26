@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NX masters - Creador de juegos para Switch</title>
+<style>
+:root{--bg:#f4f4f6;--card:#fff;--fg:#1b1b22;--mu:#6b6b78;--ac:#b00020;--ac2:#fff;--bd:#d9d9e0;--ok:#157f3b;--lg:#101015;--lgf:#c9f0d2;--sel:#fde8ec}
+@media (prefers-color-scheme:dark){:root{--bg:#121216;--card:#1c1c23;--fg:#ececf1;--mu:#9a9aa8;--ac:#e0344f;--bd:#33333d;--ok:#3ecf72;--lg:#0b0b0e;--sel:#3a1d25}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,Segoe UI,Roboto,sans-serif;padding:20px 16px 60px}
+main{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:1.6rem;margin:0}
+h2{font-size:1.05rem;margin:0 0 10px;color:var(--ac)}
+.mu{color:var(--mu);font-size:.9rem;margin:4px 0}
+section{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px}
+label{display:block;font-weight:600;margin:10px 0 4px;font-size:.92rem}
+input[type=text],input[type=password],textarea{width:100%;padding:10px;border-radius:8px;border:1px solid var(--bd);background:var(--bg);color:var(--fg);font:inherit}
+textarea{min-height:80px;resize:vertical}
+input[type=file]{max-width:100%}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:11px 16px;background:var(--ac);color:var(--ac2);cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--bd)}
+button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row>*{min-width:0}
+a{color:var(--ac)}
+#plats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.plat{background:var(--bg);color:var(--fg);border:1px solid var(--bd);text-align:left;padding:10px 12px;font-weight:600;display:flex;flex-direction:column;gap:2px}
+.plat small{font-weight:400;color:var(--mu);font-size:.78rem}
+.plat.on{border-color:var(--ac);background:var(--sel);box-shadow:inset 0 0 0 1px var(--ac)}
+.plat[disabled]{opacity:.55}
+#prev{width:128px;height:128px;border-radius:8px;border:1px solid var(--bd);background:var(--bg)}
+#log{background:var(--lg);color:var(--lgf);font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:12px;border-radius:8px;white-space:pre-wrap;max-height:300px;overflow:auto;min-height:60px;overflow-wrap:anywhere}
+#tmr{font:600 1.4rem ui-monospace,Menlo,Consolas,monospace}
+.good{color:var(--ok);font-weight:600}
+details summary{cursor:pointer;color:var(--mu);font-size:.9rem;margin-top:10px}
+#nota{background:var(--sel);border-radius:8px;padding:8px 12px;margin-top:10px;font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<h1>NX masters · Creador de juegos para Switch</h1>
+<p class="mu">Eliges la consola, escribes el nombre del juego, pones la portada y pulsas el botón. GitHub lo compila y te da un .zip listo para copiar a la SD. Tu juego nunca se sube.</p>
+
+<section>
+<h2>1. Tu sesión de GitHub</h2>
+<a id="mkTok" target="_blank" rel="noopener" href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=NX+masters+creador">Crear mi token (un toque)</a>
+<p class="mu">Se abre GitHub con los permisos <b>repo</b> y <b>workflow</b> marcados. Baja, pulsa <b>Generate token</b>, copia el código ghp_ y pégalo aquí. Solo se guarda en este navegador.</p>
+<label for="tok">Token</label>
+<input id="tok" type="password" autocomplete="off" placeholder="ghp_...">
+<label for="repo">Tu repo de compilaciones (se crea solo, privado y en TU cuenta)</label>
+<input id="repo" type="text" placeholder="se llenará solo: tu-usuario/nxmasters-builds">
+<p class="mu">No hace falta que nadie te invite: la primera vez la página crea ese repo en tu cuenta y compila ahí con tus propios minutos gratis de GitHub.</p>
+<div class="row" style="margin-top:10px"><button id="bChk" class="sec">Guardar y comprobar</button><span id="chk" class="mu"></span></div>
+</section>
+
+<section>
+<h2>2. Consola</h2>
+<div id="plats"></div>
+<div id="nota"></div>
+</section>
+
+<section>
+<h2>3. El juego</h2>
+<label for="titulo">Nombre del juego (sale en el menú y en el icono)</label>
+<input id="titulo" type="text" placeholder="Resident Evil Code Veronica X">
+<label for="iso" id="lblIso">Nombre exacto del archivo del juego</label>
+<input id="iso" type="text" placeholder="Resident Evil Code Veronica X.cue">
+<div class="row"><span class="mu">o elige el archivo (solo se lee el nombre, no se sube):</span><input id="isoFile" type="file"></div>
+<details><summary>Ruta avanzada del juego en la SD</summary>
+<label for="ruta">Ruta completa (déjala vacía para usar la normal)</label>
+<input id="ruta" type="text" placeholder="sdmc:/tico/roms/psx/Mi juego.cue">
+</details>
+<label for="cover">Portada (se recorta a 256x256 desde arriba)</label>
+<div class="row"><input id="cover" type="file" accept="image/*"><canvas id="prev" width="256" height="256"></canvas></div>
+<label for="autor">Autor</label>
+<input id="autor" type="text" value="grupo NX masters">
+<label for="cred">Créditos (uno por línea)</label>
+<textarea id="cred">Erick Escobedo</textarea>
+</section>
+
+<section>
+<h2>Pedido para un amigo (sin token)</h2>
+<p class="mu">Tu amigo llena las secciones 2 y 3 y pulsa "Generar pedido". Tú cargas el archivo y compilas.</p>
+<div class="row"><button id="bPed" class="sec">Generar pedido</button><button id="bLoad" class="sec">Cargar pedido</button><input id="pedFile" type="file" accept=".json" hidden></div>
+</section>
+
+<section>
+<h2>4. Crear</h2>
+<div class="row"><button id="bGo">Crear y compilar</button><button id="bRec" class="sec">Ya compilé: recuperar mi .zip</button><span id="tmr">00:00</span></div>
+<p class="mu" id="tiempo"></p>
+<div id="dl" class="row" style="margin:10px 0"></div>
+<div id="log">Esperando...</div>
+</section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const API='https://api.github.com';
+const esp=ms=>new Promise(r=>setTimeout(r,ms));
+const BASE='ascencionhino-web/nxmasters-outbreak';
+const tok=()=>$('tok').value.trim();
+const limpiaRepo=s=>s.trim().replace(/^https?:\/\/github\.com\//,'').replace(/\/+$/,'');
+const repo=()=>limpiaRepo($('repo').value);
+function log(m){const l=$('log');l.textContent+=(l.textContent==='Esperando...'?'':'\n')+m;l.scrollTop=l.scrollHeight;}
+try{ $('tok').value=localStorage.getItem('nx_tok')||''; const sr=localStorage.getItem('nx_repo')||''; $('repo').value=(sr&&sr!==BASE)?sr:''; }catch(e){}
+
+/* ---------- consolas ---------- */
+const PLATS=[
+ {id:'ps2',nombre:'PlayStation 2',sub:'NetherSX2 propio',tipo:'build',ext:'.iso',ejemplo:'Resident Evil Outbreak.iso',nota:'Compila un NetherSX2 con tu juego dentro (9 a 10 min). Necesita BIOS de PS2 en /switch/nxmasters/bios/.'},
+ {id:'psx',nombre:'PlayStation',sub:'DuckStation',tipo:'tico',core:'tico-duckstation',slug:'psx',ext:'.cue',ejemplo:'Resident Evil 2.cue',nota:'Necesita BIOS de PS1 donde la pida el núcleo.'},
+ {id:'dc',nombre:'Dreamcast',sub:'Flycast',tipo:'tico',core:'tico-flycast',slug:'dc',ext:'.cue',ejemplo:'Sonic Adventure (USA).cue',nota:'Pesado en Switch: no todos los juegos van bien.'},
+ {id:'psp',nombre:'PSP',sub:'PPSSPP',tipo:'tico',core:'tico-ppsspp',slug:'psp',ext:'.iso',ejemplo:'God of War.iso',nota:'Núcleo PPSSPP.'},
+ {id:'gc',nombre:'GameCube',sub:'Dolphin',tipo:'tico',core:'tico-dolphin',slug:'gc',ext:'.iso',ejemplo:'Luigis Mansion.iso',nota:'Dolphin es experimental: puede fallar y compila shaders la primera vez.'},
+ {id:'wii',nombre:'Wii',sub:'Dolphin',tipo:'tico',core:'tico-dolphin',slug:'wii',ext:'.iso',ejemplo:'Super Mario Galaxy.iso',nota:'Dolphin es experimental: puede fallar y compila shaders la primera vez.'},
+ {id:'3ds',nombre:'Nintendo 3DS',sub:'Azahar',tipo:'tico',core:'tico-azahar',slug:'3ds',ext:'.3ds',ejemplo:'Pokemon Sol.3ds',nota:'Pesado en Switch. Acepta .3ds, .cci, .cxi, .app y .3dsx. Un .cia no está en esa lista: conviértelo a .3ds/.cci.'},
+ {id:'n64',nombre:'Nintendo 64',sub:'Mupen64Plus',tipo:'tico',core:'tico-mupen64plus',slug:'n64',ext:'.z64',ejemplo:'Super Mario 64.z64',nota:'Núcleo Mupen64Plus.'},
+ {id:'snes',nombre:'Super Nintendo',sub:'Snes9x',tipo:'tico',core:'tico-snes9x',slug:'snes',ext:'.sfc',ejemplo:'Super Metroid.sfc',nota:'Núcleo Snes9x.'},
+ {id:'nes',nombre:'NES',sub:'FCEUmm',tipo:'tico',core:'tico-fceumm',slug:'nes',ext:'.nes',ejemplo:'Super Mario Bros.nes',nota:'Núcleo FCEUmm.'},
+ {id:'gb',nombre:'Game Boy',sub:'Gambatte',tipo:'tico',core:'tico-gambatte',slug:'gb',ext:'.gb',ejemplo:'Tetris.gb',nota:'Núcleo Gambatte.'},
+ {id:'gbc',nombre:'Game Boy Color',sub:'Gambatte',tipo:'tico',core:'tico-gambatte',slug:'gbc',ext:'.gbc',ejemplo:'Pokemon Cristal.gbc',nota:'Núcleo Gambatte.'},
+ {id:'gba',nombre:'Game Boy Advance',sub:'mGBA',tipo:'tico',core:'tico-mgba',slug:'gba',ext:'.gba',ejemplo:'Pokemon Esmeralda.gba',nota:'Núcleo mGBA. Buen primer juego para probar.'},
+ {id:'md',nombre:'Mega Drive',sub:'Genesis Plus GX',tipo:'tico',core:'tico-genesisplusgx',slug:'genesis',ext:'.md',ejemplo:'Sonic The Hedgehog.md',nota:'Núcleo Genesis Plus GX.'},
+ {id:'sms',nombre:'Master System',sub:'Genesis Plus GX',tipo:'tico',core:'tico-genesisplusgx',slug:'master-system',ext:'.sms',ejemplo:'Alex Kidd.sms',nota:'Núcleo Genesis Plus GX.'},
+ {id:'gg',nombre:'Game Gear',sub:'Genesis Plus GX',tipo:'tico',core:'tico-genesisplusgx',slug:'game-gear',ext:'.gg',ejemplo:'Sonic Triple Trouble.gg',nota:'Núcleo Genesis Plus GX.'},
+ {id:'scd',nombre:'Sega CD',sub:'Genesis Plus GX',tipo:'tico',core:'tico-genesisplusgx',slug:'sega-cd',ext:'.cue',ejemplo:'Sonic CD.cue',nota:'Necesita BIOS de Sega CD.'},
+ {id:'sat',nombre:'Sega Saturn',sub:'YabaSanshiro',tipo:'tico',core:'tico-yabasanshiro',slug:'saturn',ext:'.cue',ejemplo:'Nights into Dreams.cue',nota:'Núcleo YabaSanshiro.'},
+ {id:'arc',nombre:'Arcade / Neo Geo',sub:'FinalBurn Neo',tipo:'tico',core:'tico-fbneo',slug:'fbneo',ext:'.zip',ejemplo:'kof98.zip',nota:'Núcleo FinalBurn Neo: usa el .zip del romset sin descomprimir.'},
+ {id:'wiiu',nombre:'Wii U',sub:'Cemu-nx · icono en HOME',tipo:'wiiu',ext:'.wua',ejemplo:'BlackOps2.wua',nota:'Usa tu Cemu-nx. Crea un instalador que pone el icono del juego en HOME y lo abre directo; al abrirlo tienes 5 s para tocar la pantalla y entrar a los ajustes de Cemu. Pide portada. El juego va en /switch/cemu/games/.'},
+ {id:'vita',nombre:'PS Vita',sub:'Próximamente',tipo:'vita',nota:'Vita3K-nx todavía no está compilado en este repo.',off:true}
+];
+let P=PLATS[0];
+function pintarPlats(){
+  $('plats').innerHTML='';
+  for(const p of PLATS){
+    const b=document.createElement('button'); b.className='plat'+(p===P?' on':''); b.disabled=!!p.off; b.innerHTML=p.nombre+'<small>'+p.sub+'</small>';
+    b.onclick=()=>{P=p;pintarPlats();aplicarPlat();}; $('plats').appendChild(b);
+  }
+}
+function aplicarPlat(){
+  $('nota').textContent=P.nota;
+  $('iso').placeholder=P.ejemplo;
+  $('lblIso').textContent=P.tipo==='build'?'Nombre exacto de tu ISO':P.tipo==='wiiu'?'Nombre exacto del juego (.wua o carpeta)':'Nombre exacto del archivo del juego (con extensión)';
+  $('ruta').placeholder=P.tipo==='tico'?'sdmc:/tico/roms/'+P.slug+'/'+P.ejemplo:'(no se usa en PS2)';
+  $('ruta').disabled=P.tipo!=='tico';
+  $('tiempo').textContent=P.tipo==='build'?'Primera compilación de un juego nuevo: unos 9 a 10 minutos.':(P.tipo==='wiiu'?'Es un instalador pequeño: unos 4 a 6 minutos.':'Es un lanzador pequeño: unos 2 a 3 minutos.');
+}
+pintarPlats();aplicarPlat();
+
+let timer=null,t0=0;
+function tmrStart(){t0=Date.now();clearInterval(timer);timer=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('tmr').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');},1000);}
+const tmrStop=()=>clearInterval(timer);
+
+async function gh(met,url,body,raw){
+  const r=await fetch(url.startsWith('http')?url:API+url,{method:met,headers:{Accept:'application/vnd.github+json','Authorization':'Bearer '+tok(),'X-GitHub-Api-Version':'2022-11-28',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
+  if(!r.ok) throw new Error('GitHub '+met+' '+url.slice(0,70)+' -> '+r.status+' '+(await r.text()).slice(0,200));
+  return raw?r:(r.status===204?{}:r.json());
+}
+function guardar(){ try{ localStorage.setItem('nx_tok',$('tok').value.trim()); localStorage.setItem('nx_repo',limpiaRepo($('repo').value)); }catch(e){} }
+async function ensureRepo(){
+  const u=await gh('GET','/user');
+  let r=repo(); if(!r||r===BASE){ r=u.login+'/nxmasters-builds'; $('repo').value=r; }
+  try{ await gh('GET','/repos/'+r); }
+  catch(e){
+    if(!/ 404 /.test(e.message)) throw e;
+    log('Creando tu repo privado '+r+' (solo la primera vez, ~1 min)...');
+    const [own,name]=r.split('/');
+    await gh('POST','/repos/'+BASE+'/generate',{owner:own,name,private:true,description:'Compilaciones NX masters',include_all_branches:false});
+    let ok=false;
+    for(let i=0;i<30&&!ok;i++){ await esp(4000); try{ await gh('GET','/repos/'+r+'/contents/.github/workflows/build.yml'); ok=true; }catch(_){} }
+    if(!ok) throw new Error('Se creó '+r+' pero aún no está listo. Espera un minuto y pulsa de nuevo.');
+    await esp(3000);
+  }
+  guardar(); return r;
+}
+$('bChk').onclick=async()=>{
+  guardar(); $('chk').textContent='Comprobando...';
+  try{ const u=await gh('GET','/user'); const r=await ensureRepo(); $('chk').innerHTML='<span class="good">Listo: '+u.login+' / '+r+'</span>'; }
+  catch(e){ $('chk').textContent='Falló: '+e.message.slice(0,120); }
+};
+
+/* ---------- portada ---------- */
+let iconB64=null;
+$('cover').onchange=async()=>{
+  const f=$('cover').files[0]; if(!f) return;
+  const img=new Image(); img.src=URL.createObjectURL(f); await img.decode();
+  const c=$('prev'),x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,256,256);
+  const s=Math.max(256/img.width,256/img.height); x.drawImage(img,(256-img.width*s)/2,0,img.width*s,img.height*s);
+  iconB64=c.toDataURL('image/jpeg',0.92).split(',')[1];
+};
+$('isoFile').onchange=()=>{ const f=$('isoFile').files[0]; if(f){ $('iso').value=f.name; if(!$('titulo').value) $('titulo').value=f.name.replace(/\.[^.]+$/,''); } };
+
+const slug=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)||'juego';
+const carpeta=s=>s.replace(/[\\\/:*?"<>|]/g,'').trim()||'Juego';
+const cstr=s=>'"'+s.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
+const ramaDe=(p,t)=>(p.tipo==='build'?'game/':p.tipo==='wiiu'?'wiiu/':'fwd/')+slug(p.id+'-'+t);
+const artDe=(p,t)=>'nro-'+ramaDe(p,t).replace('/','-');
+const flujoDe=p=>p.tipo==='build'?{wf:'build.yml',paso:20000}:p.tipo==='wiiu'?{wf:'wiiu-game.yml',paso:15000}:{wf:'build-fwd.yml',paso:10000};
+
+/* ---------- pedido ---------- */
+$('bPed').onclick=()=>{
+  const titulo=$('titulo').value.trim(), iso=$('iso').value.trim();
+  if(!titulo||!iso) return log('Para el pedido falta el nombre del juego o del archivo.');
+  const o={nx:2,plat:P.id,titulo,iso,ruta:$('ruta').value.trim(),autor:$('autor').value.trim(),cred:$('cred').value,icon:iconB64};
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(o)],{type:'application/json'})); a.download='pedido-'+slug(P.id+'-'+titulo)+'.json'; a.click();
+  log('Pedido generado: mándale ese archivo a quien compila por ti.');
+};
+$('bLoad').onclick=()=>$('pedFile').click();
+$('pedFile').onchange=async()=>{
+  try{
+    const o=JSON.parse(await $('pedFile').files[0].text()); if(!o.nx) throw new Error('No es un pedido válido');
+    P=PLATS.find(p=>p.id===(o.plat||'ps2')&&!p.off)||PLATS[0]; pintarPlats(); aplicarPlat();
+    $('titulo').value=o.titulo||''; $('iso').value=o.iso||''; $('ruta').value=o.ruta||''; $('autor').value=o.autor||'grupo NX masters'; $('cred').value=o.cred||'';
+    if(o.icon){ iconB64=o.icon; const im=new Image(); im.onload=()=>{$('prev').getContext('2d').drawImage(im,0,0,256,256);}; im.src='data:image/jpeg;base64,'+o.icon; }
+    log('Pedido cargado: '+o.titulo+' ('+P.nombre+'). Pulsa "Crear y compilar".');
+  }catch(e){ log('ERROR: '+e.message); }
+};
+
+/* ---------- datos ---------- */
+function datos(){
+  const titulo=$('titulo').value.trim().replace(/[#$`\t"\\]/g,''), iso=$('iso').value.trim().replace(/[\/\\"$`]/g,''), autor=($('autor').value.trim()||'grupo NX masters').replace(/[#$\t"\\]/g,'');
+  if(!titulo) throw new Error('Falta el nombre del juego');
+  if(!iso) throw new Error('Falta el nombre del archivo del juego');
+  if(!tok()) throw new Error('Falta el token de GitHub');
+  const cred=$('cred').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const romDir=P.tipo==='tico'?'sdmc:/tico/roms/'+P.slug+'/':'';
+  if(P.tipo==='wiiu'&&!iconB64) throw new Error('Para Wii U hace falta la portada (es el icono de HOME)');
+  const ruta=P.tipo==='tico'?($('ruta').value.trim()||romDir+iso):(P.tipo==='wiiu'?'sdmc:/switch/cemu/games/'+iso:'');
+  return {titulo,iso,autor,cred,ruta};
+}
+function textoCreditos(d){
+  return d.titulo+' - Switch ('+P.nombre+')\nHecho por '+d.autor+'\n'+d.cred.map(c=>'Créditos a '+c).join('\n')+'\n\n'+
+(P.tipo==='wiiu'?'Emulación: Cemu-nx de NaGaa95 (MPL 2.0, https://github.com/NaGaa95/Cemu-nx), con el instalador de icono de Asce22.\nNo incluye juegos ni claves. Cada usuario debe usar sus propios juegos.\n':P.tipo==='build'?'Base y software original\n- NetherSX2 Switch Port por NaGaa95 (https://github.com/NaGaa95/NetherSX2_nx), licencia MIT\n- AetherSX2 / PCSX2 (emulador)\n- Mantenedores de los builds parcheados de NetherSX2\n- fgsfds (base del so-loader para Switch)\n- TheOfficialFloW (so-loader original para Android)\n- Dantiicu (driver Vulkan para Switch)\n- Slluxx (IconGrabber)\n\nEste proyecto no incluye BIOS, imagen de disco ni el núcleo del emulador.\nCada usuario debe usar su propia BIOS y sus propios juegos.\n'
+:'Emulación: núcleo '+P.core+' de Tico (https://github.com/ticohq), con sus licencias de código abierto.\nEste lanzador solo abre el núcleo con el juego elegido. No incluye juegos, BIOS ni núcleos.\nCada usuario debe usar sus propios juegos.\n');
+}
+function instrucciones(d){
+  if(P.tipo==='wiiu') return 'COMO USAR ('+d.titulo+' - Wii U)\n\n1. Copia la carpeta "switch" de este zip a la raiz de tu SD (se une con la tuya).\n2. Pon tu juego (sacado de TU Wii U) en: /switch/cemu/games/'+d.iso+'\n   (el nombre debe ser EXACTAMENTE ese; puede ser un .wua o una carpeta con code, content y meta)\n3. Abre el Homebrew Menu EN MODO TITULO (manten R al abrir un juego) y abre "Instalar '+d.titulo+'". Pulsa A.\n4. Vuelve al HOME: ya esta el icono. Al abrirlo tienes 5 segundos para tocar la pantalla y abrir los ajustes de Cemu; si no tocas, entra directo al juego.\n   SIN sigpatches: no hace falta el instalador; abre "'+d.titulo+'" directo desde el Homebrew Menu (mismo conteo).\n\nNecesitas sigpatches para que el icono del HOME abra. Los .wud/.wux piden la key del disco en /switch/cemu/keys.txt.\n\nHecho por '+d.autor+'.\n'+d.cred.map(c=>'Créditos a '+c).join('\n')+'\nEmulador: Cemu-nx de NaGaa95 (MPL 2.0).\n';
+  if(P.tipo==='build') return 'COMO USAR ('+d.titulo+' - PlayStation 2)\n\n1. Copia la carpeta "switch" de este zip a la raiz de tu SD (combina carpetas si te pregunta).\n2. Pon tu ISO en: /switch/nxmasters/games/'+d.iso+'\n   (el nombre debe ser EXACTAMENTE ese)\n3. Pon tu BIOS de PS2 en: /switch/nxmasters/bios/ (solo una vez para todos los juegos).\n4. Abre el .nro desde el Homebrew Menu: arranca directo el juego.\n5. Icono en HOME: abre el .nro en modo applet (manten R al abrir un juego o entra por el album) y confirma "Installing HOME Menu shortcut".\n\nMenu en juego: L + R + Plus.\nResolucion: en /switch/nxmasters/launcher.ini cambia EmuCore/GS/upscale_multiplier (1 nativa, 2 ~720p, 3 ~1080p).\n\nHecho por '+d.autor+'.\n'+d.cred.map(c=>'Créditos a '+c).join('\n')+'\n';
+  return 'COMO USAR ('+d.titulo+' - '+P.nombre+')\n\n1. Necesitas el nucleo "'+P.core+'.nro" en /switch/nxmasters/cores/ (de tu cores.zip) o instalado en Tico (Settings > Cores).\n2. Copia la carpeta "switch" de este zip a la raiz de tu SD.\n3. Pon tu juego en: '+d.ruta.replace('sdmc:','')+'\n   (el nombre debe ser EXACTAMENTE ese; si usa varios archivos, como .cue + .bin, ponlos juntos)\n4. Abre "'+d.titulo+'" desde el Homebrew Menu: abre el nucleo con tu juego ya puesto.\n\nNota: este lanzador aparece en el Homebrew Menu. Si no encuentra el nucleo o el juego, muestra en pantalla la ruta que buscó.\n\nHecho por '+d.autor+'.\n'+d.cred.map(c=>'Créditos a '+c).join('\n')+'\n';
+}
+
+/* ---------- rama ---------- */
+async function crearRama(d){
+  const R='/repos/'+repo(), br=ramaDe(P,d.titulo);
+  const base=await gh('GET',R+'/git/ref/heads/main'); const baseSha=base.object.sha;
+  const bc=await gh('GET',R+'/git/commits/'+baseSha);
+  const tree=[], blob=async(p,t,enc)=>{ const b=await gh('POST',R+'/git/blobs',{content:t,encoding:enc||'utf-8'}); tree.push({path:p,mode:'100644',type:'blob',sha:b.sha}); return b.sha; };
+  if(P.tipo==='build'){
+    const mk=await gh('GET',R+'/contents/launcher/Makefile?ref=main');
+    let mkt=new TextDecoder().decode(Uint8Array.from(atob(mk.content.replace(/\n/g,'')),c=>c.charCodeAt(0)));
+    mkt=mkt.replace(/^(APP_TITLE\s*:=\s*).*$/m,(m,a)=>a+d.titulo).replace(/^(APP_AUTHOR\s*:=\s*).*$/m,(m,a)=>a+d.autor);
+    const hdr='#pragma once\n#define FIXED_DISC '+cstr('sdmc:/switch/nxmasters/games/'+d.iso)+'\n#define FIXED_TITLE '+cstr(d.titulo)+'\n#define FIXED_AUTHOR '+cstr(d.autor)+'\n';
+    const cr=textoCreditos(d);
+    await blob('launcher/source/fixed_game.h',hdr); await blob('launcher/Makefile',mkt); await blob('CREDITS.txt',cr); await blob('launcher/romfs/CREDITS.txt',cr);
+    if(iconB64){ const s=await blob('icon.jpg',iconB64,'base64'); for(const p of ['launcher/NetherSX2.jpg','launcher/romfs/forwarder-icon.jpg']) tree.push({path:p,mode:'100644',type:'blob',sha:s}); }
+  } else if(P.tipo==='wiiu'){
+    const sl=br.split('/')[1];
+    const conf='# Generado por el Creador NX masters\nROOT_NAME='+sl+'\nAPP_NAME="'+d.titulo+'"\nAPP_AUTHOR="'+d.autor+'"\nAPP_ICON=cemu-games/'+sl+'.jpg\nGAME_PATH="'+d.ruta+'"\nGAME_PATH_ALT=\n';
+    await blob('cemu-games-extra/'+sl+'.conf',conf); await blob('cemu-games-extra/'+sl+'.jpg',iconB64,'base64');
+  } else {
+    const hdr='#define FWD_CORE '+cstr(P.core)+'\n#define FWD_SLUG '+cstr(P.slug)+'\n#define FWD_ROM '+cstr(d.ruta)+'\n#define FWD_TITLE '+cstr(d.titulo)+'\n#define FWD_MODE 0\n';
+    await blob('fwd/fixed.h',hdr); await blob('fwd/app.cfg','TITLE='+d.titulo+'\nAUTHOR='+d.autor+'\n');
+    if(iconB64) await blob('fwd/icon.jpg',iconB64,'base64');
+  }
+  const nt=await gh('POST',R+'/git/trees',{base_tree:bc.tree.sha,tree});
+  const cm=await gh('POST',R+'/git/commits',{message:'Juego: '+d.titulo+' ('+P.nombre+')',tree:nt.sha,parents:[baseSha]});
+  try{ await gh('GET',R+'/git/ref/heads/'+br); await gh('PATCH',R+'/git/refs/heads/'+br,{sha:cm.sha,force:true}); }
+  catch(e){ await gh('POST',R+'/git/refs',{ref:'refs/heads/'+br,sha:cm.sha}); }
+  return cm.sha;
+}
+async function buscarRun(sha,br){
+  const R='/repos/'+repo();
+  for(let i=0;i<6;i++){ await esp(5000); const r=(await gh('GET',R+'/actions/runs?head_sha='+sha+'&per_page=5')).workflow_runs; if(r.length) return r[0]; }
+  log('GitHub no la lanzó solo, la lanzo yo...');
+  await gh('POST',R+'/actions/workflows/'+flujoDe(P).wf+'/dispatches',{ref:br});
+  for(let i=0;i<12;i++){ await esp(5000); const r=(await gh('GET',R+'/actions/runs?head_sha='+sha+'&per_page=5')).workflow_runs; if(r.length) return r[0]; }
+  throw new Error('No encontré la compilación en GitHub. Abre la pestaña Actions del repo.');
+}
+async function explicarFallo(run){
+  try{ const R='/repos/'+repo(); const js=(await gh('GET',R+'/actions/runs/'+run.id+'/jobs')).jobs.filter(j=>j.conclusion==='failure');
+    for(const j of js){ const p=(j.steps||[]).find(s=>s.conclusion==='failure'); log('Falló el trabajo "'+j.name+'"'+(p?' en el paso "'+p.name+'"':'')+'.'); } }catch(e){}
+  log('Abre '+run.html_url+' y mándale una captura del paso rojo a Claude.');
+}
+async function armarZip(d,blobZip){
+  const inner=await JSZip.loadAsync(await blobZip.arrayBuffer());
+  if(P.tipo==='wiiu'){
+    const cardName=Object.keys(inner.files).find(n=>/\.zip$/i.test(n)); if(!cardName) throw new Error('El resultado no trae el zip del juego');
+    const card=await JSZip.loadAsync(await inner.files[cardName].async('uint8array')), z2=new JSZip(), f2=carpeta(d.titulo);
+    for(const n of Object.keys(card.files)){ const e=card.files[n]; if(e.dir) continue; z2.file(n,await e.async('uint8array')); }
+    z2.file('INSTRUCCIONES - '+f2+'.txt',instrucciones(d)); z2.file('CREDITS.txt',textoCreditos(d));
+    const out2=await z2.generateAsync({type:'blob',compression:'DEFLATE'});
+    const b2=document.createElement('button'); b2.textContent='Descargar '+f2+'.zip'; $('dl').innerHTML=''; $('dl').appendChild(b2);
+    const dl2=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(out2);a.download=f2+'.zip';a.click();};
+    b2.onclick=dl2; dl2(); log('Listo: '+f2+'.zip'); return;
+  }
+  const nn=Object.keys(inner.files).find(n=>/\.nro$/i.test(n)); if(!nn) throw new Error('El resultado no trae .nro');
+  const nro=await inner.files[nn].async('uint8array'), f=carpeta(d.titulo), z=new JSZip();
+  z.file('switch/'+f+'/'+f+'.nro',nro);
+  if(P.tipo==='build'){
+    z.file('switch/nxmasters/games/LEEME - '+f+'.txt','Pon aqui el ISO con este nombre exacto:\n'+d.iso+'\n');
+    z.file('switch/nxmasters/bios/LEEME.txt','Pon aqui los archivos de tu BIOS de PS2.\n');
+  } else {
+    z.file(d.ruta.replace('sdmc:/','')+'.LEEME.txt','Pon aqui tu juego con este nombre exacto:\n'+d.ruta+'\n');
+  }
+  z.file('INSTRUCCIONES - '+f+'.txt',instrucciones(d)); z.file('CREDITS.txt',textoCreditos(d));
+  const out=await z.generateAsync({type:'blob',compression:'DEFLATE'});
+  const b=document.createElement('button'); b.textContent='Descargar '+f+'.zip'; $('dl').innerHTML=''; $('dl').appendChild(b);
+  const dlf=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=f+'.zip';a.click();};
+  b.onclick=dlf; dlf(); log('Listo: '+f+'.zip (si no bajó solo, pulsa el botón).');
+}
+async function bajar(d,run){
+  const R='/repos/'+repo();
+  const arts=(await gh('GET',R+'/actions/runs/'+run.id+'/artifacts')).artifacts, art=arts.find(a=>a.name===artDe(P,d.titulo))||arts[0];
+  if(!art) throw new Error('No hay artefacto (quizá pasaron más de 14 días).');
+  log('Descargando '+art.name+'...');
+  try{ const r=await gh('GET',R+'/actions/artifacts/'+art.id+'/zip',null,true); await armarZip(d,await r.blob()); }
+  catch(e){ log('No pude bajarlo desde el navegador ('+e.message.slice(0,100)+'). Abre '+run.html_url+' y baja "'+art.name+'" de Artifacts.'); }
+}
+
+$('bGo').onclick=async()=>{
+  $('bGo').disabled=true; $('dl').innerHTML=''; $('log').textContent='Esperando...';
+  try{
+    guardar();
+    const d=datos(); tmrStart(); await ensureRepo(); const br=ramaDe(P,d.titulo);
+    log('Consola: '+P.nombre+'. Creando la rama '+br+'...');
+    const sha=await crearRama(d); log('Archivos subidos. Esperando la compilación...');
+    const run=await buscarRun(sha,br); log('Compilación: '+run.html_url);
+    let r=run,last='';
+    while(true){
+      r=await gh('GET','/repos/'+repo()+'/actions/runs/'+run.id);
+      const st=r.status+(r.conclusion?' / '+r.conclusion:''); if(st!==last){ log('Estado: '+st); last=st; }
+      if(r.status==='completed') break; await esp(flujoDe(P).paso);
+    }
+    tmrStop();
+    if(r.conclusion!=='success'){ await explicarFallo(r); throw new Error('La compilación falló'); }
+    await bajar(d,r);
+  }catch(e){ tmrStop(); log('ERROR: '+e.message); }
+  $('bGo').disabled=false;
+};
+$('bRec').onclick=async()=>{
+  try{
+    const d=datos(); await ensureRepo(); const R='/repos/'+repo();
+    const runs=(await gh('GET',R+'/actions/runs?branch='+encodeURIComponent(ramaDe(P,d.titulo))+'&status=success&per_page=1')).workflow_runs;
+    if(!runs.length) return log('No hay compilación exitosa de "'+d.titulo+'" ('+P.nombre+') todavía.');
+    await bajar(d,runs[0]);
+  }catch(e){ log('ERROR: '+e.message); }
+};
+</script>
+</body>
+</html>

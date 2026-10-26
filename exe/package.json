@@ -1,0 +1,20 @@
+{
+  "name": "nxmasters-creador",
+  "productName": "NX masters Creador",
+  "version": "1.0.0",
+  "description": "Creador de juegos para Switch - grupo NX masters",
+  "author": "grupo NX masters",
+  "main": "main.js",
+  "private": true,
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.nxmasters.creador",
+    "productName": "NX masters Creador",
+    "files": ["main.js", "page/**"],
+    "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "artifactName": "NXmasters-Creador.exe" },
+    "forceCodeSigning": false
+  }
+}
