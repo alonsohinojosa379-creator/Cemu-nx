@@ -4,6 +4,8 @@
 #include <switch.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include "../asce_installer/source/game_config.h"
 
 #define CEMU "sdmc:/switch/cemu/cemu.nro"
 #define ESPERA_MS 5000
@@ -12,6 +14,11 @@ int main(int argc, char **argv)
 {
     char game[600] = {0};
     if (argc >= 2 && argv[1]) snprintf(game, sizeof game, "%s", argv[1]);
+    else {   // abierto desde el Homebrew Menu: usa el juego de este paquete
+        struct stat st;
+        if (stat(GAME_PATH, &st) == 0) snprintf(game, sizeof game, "%s", GAME_PATH);
+        else if (GAME_PATH_ALT[0] && stat(GAME_PATH_ALT, &st) == 0) snprintf(game, sizeof game, "%s", GAME_PATH_ALT);
+    }
 
     consoleInit(NULL);
     hidInitializeTouchScreen();

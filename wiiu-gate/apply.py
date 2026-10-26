@@ -26,4 +26,4 @@ sub(b, 'echo "[4/4] Zip para la SD"',
 sub(b, 'cp "$I/instalar-$ROOT_NAME.nro" "$OUT/switch/cemu-$ROOT_NAME/"',
        'cp "$I/instalar-$ROOT_NAME.nro" "$OUT/switch/cemu-$ROOT_NAME/"\ncp wiiu-gate/gate.nro "$OUT/switch/cemu-$ROOT_NAME/gate.nro"')
 sub(b, '"4. Vuelve al HOME: ya esta el icono. Se abre directo en el juego." \\',
-       '"4. Vuelve al HOME: ya esta el icono. Al abrirlo tienes 5 segundos para" \\\n  "   tocar la pantalla y abrir los ajustes; si no, entra directo al juego." \\')
+       '"4. Vuelve al HOME: ya esta el icono. Al abrirlo tienes 5 segundos para" \\\n  "   tocar la pantalla y abrir los ajustes; si no, entra directo al juego." \\\n  "   SIN sigpatches: no hace falta el instalador; abre \\"$APP_NAME\\" directo desde el Homebrew Menu (mismo conteo)." \\')
