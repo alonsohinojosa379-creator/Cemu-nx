@@ -48,14 +48,9 @@ details summary{cursor:pointer;color:var(--mu);font-size:.9rem;margin-top:10px}
 <p class="mu">Se abre GitHub con los permisos <b>repo</b> y <b>workflow</b> marcados. Baja, pulsa <b>Generate token</b>, copia el código ghp_ y pégalo aquí. Solo se guarda en este navegador.</p>
 <label for="tok">Token</label>
 <input id="tok" type="password" autocomplete="off" placeholder="ghp_...">
-<label for="repo">Repo privado base</label>
-<input id="repo" type="text" value="ascencionhino-web/nxmasters-outbreak">
-<details><summary>Wii U (otra cuenta o repo)</summary>
-<label for="repo2">Repo de Cemu-nx para Wii U</label>
-<input id="repo2" type="text" value="alonsohinojosa379-creator/Cemu-nx">
-<label for="tok2">Token para Wii U (déjalo vacío si es el mismo de arriba)</label>
-<input id="tok2" type="password" autocomplete="off" placeholder="ghp_...">
-</details>
+<label for="repo">Tu repo de compilaciones (se crea solo, privado y en TU cuenta)</label>
+<input id="repo" type="text" placeholder="se llenará solo: tu-usuario/nxmasters-builds">
+<p class="mu">No hace falta que nadie te invite: la primera vez la página crea ese repo en tu cuenta y compila ahí con tus propios minutos gratis de GitHub.</p>
 <div class="row" style="margin-top:10px"><button id="bChk" class="sec">Guardar y comprobar</button><span id="chk" class="mu"></span></div>
 </section>
 
@@ -104,11 +99,12 @@ details summary{cursor:pointer;color:var(--mu);font-size:.9rem;margin-top:10px}
 const $=id=>document.getElementById(id);
 const API='https://api.github.com';
 const esp=ms=>new Promise(r=>setTimeout(r,ms));
-const tok=()=>(P&&P.tipo==='wiiu'&&$('tok2').value.trim())?$('tok2').value.trim():$('tok').value.trim();
+const BASE='ascencionhino-web/nxmasters-outbreak';
+const tok=()=>$('tok').value.trim();
 const limpiaRepo=s=>s.trim().replace(/^https?:\/\/github\.com\//,'').replace(/\/+$/,'');
-const repo=()=>limpiaRepo((P&&P.tipo==='wiiu'&&$('repo2').value.trim())?$('repo2').value:$('repo').value);
+const repo=()=>limpiaRepo($('repo').value);
 function log(m){const l=$('log');l.textContent+=(l.textContent==='Esperando...'?'':'\n')+m;l.scrollTop=l.scrollHeight;}
-try{ $('tok').value=localStorage.getItem('nx_tok')||''; $('repo').value=localStorage.getItem('nx_repo')||$('repo').value; $('tok2').value=localStorage.getItem('nx_tok2')||''; $('repo2').value=localStorage.getItem('nx_repo2')||$('repo2').value; }catch(e){}
+try{ $('tok').value=localStorage.getItem('nx_tok')||''; const sr=localStorage.getItem('nx_repo')||''; $('repo').value=(sr&&sr!==BASE)?sr:''; }catch(e){}
 
 /* ---------- consolas ---------- */
 const PLATS=[
@@ -161,15 +157,27 @@ async function gh(met,url,body,raw){
   if(!r.ok) throw new Error('GitHub '+met+' '+url.slice(0,70)+' -> '+r.status+' '+(await r.text()).slice(0,200));
   return raw?r:(r.status===204?{}:r.json());
 }
-function guardar(){ try{ localStorage.setItem('nx_tok',$('tok').value.trim()); localStorage.setItem('nx_repo',limpiaRepo($('repo').value)); localStorage.setItem('nx_tok2',$('tok2').value.trim()); localStorage.setItem('nx_repo2',limpiaRepo($('repo2').value)); }catch(e){} }
-$('bChk').onclick=async()=>{
-  guardar(); const keep=P, res=[];
-  for(const pl of [PLATS[0],PLATS.find(x=>x.tipo==='wiiu')]){
-    P=pl;
-    try{ const u=await gh('GET','/user'); await gh('GET','/repos/'+repo()); res.push('<span class="good">'+pl.nombre+': '+u.login+' / '+repo()+'</span>'); }
-    catch(e){ res.push(pl.nombre+' falló: '+e.message.slice(0,90)); }
+function guardar(){ try{ localStorage.setItem('nx_tok',$('tok').value.trim()); localStorage.setItem('nx_repo',limpiaRepo($('repo').value)); }catch(e){} }
+async function ensureRepo(){
+  const u=await gh('GET','/user');
+  let r=repo(); if(!r||r===BASE){ r=u.login+'/nxmasters-builds'; $('repo').value=r; }
+  try{ await gh('GET','/repos/'+r); }
+  catch(e){
+    if(!/ 404 /.test(e.message)) throw e;
+    log('Creando tu repo privado '+r+' (solo la primera vez, ~1 min)...');
+    const [own,name]=r.split('/');
+    await gh('POST','/repos/'+BASE+'/generate',{owner:own,name,private:true,description:'Compilaciones NX masters',include_all_branches:false});
+    let ok=false;
+    for(let i=0;i<30&&!ok;i++){ await esp(4000); try{ await gh('GET','/repos/'+r+'/contents/.github/workflows/build.yml'); ok=true; }catch(_){} }
+    if(!ok) throw new Error('Se creó '+r+' pero aún no está listo. Espera un minuto y pulsa de nuevo.');
+    await esp(3000);
   }
-  P=keep; $('chk').innerHTML=res.join('<br>');
+  guardar(); return r;
+}
+$('bChk').onclick=async()=>{
+  guardar(); $('chk').textContent='Comprobando...';
+  try{ const u=await gh('GET','/user'); const r=await ensureRepo(); $('chk').innerHTML='<span class="good">Listo: '+u.login+' / '+r+'</span>'; }
+  catch(e){ $('chk').textContent='Falló: '+e.message.slice(0,120); }
 };
 
 /* ---------- portada ---------- */
@@ -314,7 +322,7 @@ $('bGo').onclick=async()=>{
   $('bGo').disabled=true; $('dl').innerHTML=''; $('log').textContent='Esperando...';
   try{
     guardar();
-    const d=datos(); tmrStart(); const br=ramaDe(P,d.titulo);
+    const d=datos(); tmrStart(); await ensureRepo(); const br=ramaDe(P,d.titulo);
     log('Consola: '+P.nombre+'. Creando la rama '+br+'...');
     const sha=await crearRama(d); log('Archivos subidos. Esperando la compilación...');
     const run=await buscarRun(sha,br); log('Compilación: '+run.html_url);
@@ -332,7 +340,7 @@ $('bGo').onclick=async()=>{
 };
 $('bRec').onclick=async()=>{
   try{
-    const d=datos(); const R='/repos/'+repo();
+    const d=datos(); await ensureRepo(); const R='/repos/'+repo();
     const runs=(await gh('GET',R+'/actions/runs?branch='+encodeURIComponent(ramaDe(P,d.titulo))+'&status=success&per_page=1')).workflow_runs;
     if(!runs.length) return log('No hay compilación exitosa de "'+d.titulo+'" ('+P.nombre+') todavía.');
     await bajar(d,runs[0]);
