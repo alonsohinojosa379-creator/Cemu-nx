@@ -297,10 +297,18 @@ async function explicarFallo(run){
     for(const j of js){ const p=(j.steps||[]).find(s=>s.conclusion==='failure'); log('Falló el trabajo "'+j.name+'"'+(p?' en el paso "'+p.name+'"':'')+'.'); } }catch(e){}
   log('Abre '+run.html_url+' y mándale una captura del paso rojo a Claude.');
 }
+function memo(k,v){ try{ if(v===undefined) return JSON.parse(localStorage.getItem(k)||'null'); localStorage.setItem(k,JSON.stringify(v)); }catch(e){ return null; } }
+function recordados(){
+  const kc='nx_core_'+(P.core||P.id), kb='nx_bios_'+P.id;
+  const c=[...$('incCore').files], b=[...$('incBios').files];
+  if(window.nx){ if(c.length) memo(kc,c.map(f=>({n:f.name,p:window.nx.rutaDe(f),s:f.size}))); if(b.length) memo(kb,b.map(f=>({n:f.name,p:window.nx.rutaDe(f),s:f.size}))); }
+  return {core:c.length?[]:(memo(kc)||[]), bios:b.length?[]:(memo(kb)||[])};
+}
 function destinosExtras(d){
   const g=[...$('incGame').files], c=[...$('incCore').files], bi=[...$('incBios').files], out=[];
   const gdir=P.tipo==='build'?'switch/nxmasters/games/':P.tipo==='wiiu'?'switch/cemu/games/':d.ruta.replace('sdmc:/','').replace(/[^\/]*$/,'');
   for(const f of g) out.push({f,dest:gdir+f.name});
+  if(window.nx){ const r=recordados(); if(P.tipo==='tico') for(const x of r.core) out.push({f:{name:x.n,size:x.s,_p:x.p},dest:'switch/nxmasters/cores/'+x.n}); if(P.tipo!=='wiiu') for(const x of r.bios) out.push({f:{name:x.n,size:x.s,_p:x.p},dest:'switch/nxmasters/bios/'+x.n}); }
   if(g.length&&!g.some(f=>f.name===d.iso)) log('AVISO: ninguno de los archivos del juego se llama "'+d.iso+'" (el nombre que pusiste arriba). El lanzador busca ese nombre exacto.');
   if(P.tipo==='tico') for(const f of c) out.push({f,dest:'switch/nxmasters/cores/'+f.name});
   if(P.tipo!=='wiiu') for(const f of bi) out.push({f,dest:'switch/nxmasters/bios/'+f.name});
@@ -318,17 +326,17 @@ if(window.nx){ $('sdBox').style.display='block'; $('bSd').onclick=async()=>{ con
   $('bZip').onclick=async()=>{ const r=await window.nx.elegirZip(carpeta($('titulo').value.trim()||'juego')+'.zip'); if(r){ $('sdRoot').textContent=r; $('sdRoot').dataset.modo='zip'; } }; }
 async function sdModo(zip,d){
   const root=$('sdRoot').textContent.trim(), modo=$('sdRoot').dataset.modo; if(!window.nx||!root||!modo) return false;
-  const nx=window.nx, ex=destinosExtras(d);
+  const nx=window.nx, ex=destinosExtras(d), ruta=x=>x.f._p||nx.rutaDe(x.f);
   if(modo==='zip'){
     log('Armando '+root+' ...'); await nx.zipIniciar(root);
     for(const n of Object.keys(zip.files)){ const e=zip.files[n]; if(e.dir) continue; await nx.zipBuffer(n,await e.async('uint8array')); }
-    for(const x of ex){ log('Agregando '+x.f.name+'...'); await nx.zipArchivo(nx.rutaDe(x.f),x.dest); }
+    for(const x of ex){ log('Agregando '+x.f.name+'...'); await nx.zipArchivo(ruta(x),x.dest); }
     await nx.zipFin(); log('LISTO: '+root+' (trae las carpetas switch y tico). Descomprímelo y arrastra switch y tico a la raíz de la SD.');
     return true;
   }
   log('Copiando a '+root+' ...');
   for(const n of Object.keys(zip.files)){ const e=zip.files[n]; if(e.dir) continue; await nx.escribir(root,n,await e.async('uint8array')); }
-  for(const x of ex){ log('Copiando '+x.f.name+'...'); await nx.copiar(nx.rutaDe(x.f),root,x.dest); }
+  for(const x of ex){ log('Copiando '+x.f.name+'...'); await nx.copiar(ruta(x),root,x.dest); }
   log('LISTO: todo quedó en '+root+' (carpetas switch y tico). Ya puedes sacar la SD.');
   return true;
 }
