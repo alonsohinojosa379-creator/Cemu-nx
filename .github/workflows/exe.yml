@@ -18,7 +18,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          (npm install && npx electron-builder --win portable --x64 --publish never) > build.log 2>&1
+          (npm install && npm run bundle && node smoke.js && npx electron-builder --win portable --x64 --publish never) > build.log 2>&1
           rc=$?
           if [ $rc -ne 0 ]; then
             msg=$(grep -n -i -E "error|fail|cannot|invalid|warn|nsis|makensis" build.log | head -n 30 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')

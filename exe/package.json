@@ -4,17 +4,19 @@
   "version": "1.0.0",
   "description": "Creador de juegos para Switch - grupo NX masters",
   "author": "grupo NX masters",
-  "main": "main.js",
+  "main": "main.bundle.js",
   "private": true,
   "devDependencies": {
     "electron": "33.2.1",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "archiver": "7.0.1",
+    "esbuild": "0.24.0"
   },
   "build": {
     "appId": "com.nxmasters.creador",
     "productName": "NX masters Creador",
     "files": [
-      "main.js",
+      "main.bundle.js",
       "preload.js",
       "page/**"
     ],
@@ -31,7 +33,7 @@
     },
     "forceCodeSigning": false
   },
-  "dependencies": {
-    "archiver": "7.0.1"
+  "scripts": {
+    "bundle": "esbuild main.js --bundle --platform=node --external:electron --outfile=main.bundle.js"
   }
 }
