@@ -1,6 +1,8 @@
 const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
+let zipSt = null;
 
 // Destino seguro: nunca sale de la carpeta elegida.
 function destino(root, rel) {
@@ -27,6 +29,31 @@ ipcMain.handle('nx:copiar', async (_e, src, root, rel) => {
   await fs.promises.copyFile(src, full);
   return true;
 });
+
+ipcMain.handle('nx:elegirZip', async (_e, nombre) => {
+  const r = await dialog.showSaveDialog({ title: 'Guardar el zip completo', defaultPath: nombre, filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  return r.canceled ? null : r.filePath;
+});
+ipcMain.handle('nx:zipIniciar', async (_e, dest) => {
+  const out = fs.createWriteStream(dest);
+  const ar = archiver('zip', { zlib: { level: 0 }, forceZip64: true });
+  const fin = new Promise((res, rej) => { out.on('close', res); out.on('error', rej); ar.on('error', rej); });
+  ar.pipe(out);
+  zipSt = { ar, fin };
+  return true;
+});
+ipcMain.handle('nx:zipBuffer', async (_e, rel, data) => { zipSt.ar.append(Buffer.from(data), { name: rel.replace(/\\/g, '/') }); return true; });
+ipcMain.handle('nx:zipArchivo', async (_e, src, rel) => {
+  // espera a que termine de leerse cada archivo grande antes de seguir
+  await new Promise((res, rej) => {
+    const rs = fs.createReadStream(src);
+    rs.on('error', rej);
+    zipSt.ar.append(rs, { name: rel.replace(/\\/g, '/') });
+    zipSt.ar.once('entry', () => res());
+  });
+  return true;
+});
+ipcMain.handle('nx:zipFin', async () => { await zipSt.ar.finalize(); await zipSt.fin; zipSt = null; return true; });
 
 function crear() {
   Menu.setApplicationMenu(null);

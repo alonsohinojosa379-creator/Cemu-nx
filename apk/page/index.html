@@ -76,9 +76,10 @@ details summary{cursor:pointer;color:var(--mu);font-size:.9rem;margin-top:10px}
 <details><summary>Incluir el juego, el núcleo y la BIOS dentro del zip (opcional)</summary>
 <p class="mu">Así solo descomprimes y arrastras <b>switch</b> y <b>tico</b> a la SD. Los archivos se quedan en tu equipo: se meten al zip aquí mismo, no se suben a internet. Funciona bien hasta ~1.8 GB en total; si es más, cópialos a mano.</p>
 <div id="sdBox" style="display:none;background:var(--sel);border-radius:8px;padding:8px 12px;margin:8px 0">
-<b>App de PC: armar directo en tu SD</b>
-<p class="mu">Elige la letra de tu SD (o cualquier carpeta). El juego, núcleo y BIOS se copian directo, sin límite de tamaño, y no se arma ningún zip.</p>
-<div class="row"><button id="bSd" class="sec" type="button">Elegir SD / carpeta destino</button><span id="sdRoot" class="mu"></span></div>
+<b>App de PC: armar todo (SD directa o un solo .zip)</b>
+<p class="mu">Elige la letra de tu SD, o guarda todo en un solo .zip con el juego, núcleo y BIOS adentro (sin límite de tamaño). Solo usas una de las dos.</p>
+<div class="row"><button id="bSd" class="sec" type="button">Elegir SD / carpeta destino</button><button id="bZip" class="sec" type="button">Guardar todo en un solo .zip</button></div>
+<p class="mu" id="sdRoot"></p>
 </div>
 <label for="incGame">Juego (todos sus archivos, ej. .cue + .bin)</label>
 <input id="incGame" type="file" multiple>
@@ -313,12 +314,21 @@ function agregarExtras(zip,d){
   log('Incluidos en el zip: '+ex.length+' archivo(s) extra.');
 }
 // App de PC: escribe todo directo en la carpeta elegida (SD)
-if(window.nx){ $('sdBox').style.display='block'; $('bSd').onclick=async()=>{ const r=await window.nx.elegirCarpeta(); if(r) $('sdRoot').textContent=r; }; }
+if(window.nx){ $('sdBox').style.display='block'; $('bSd').onclick=async()=>{ const r=await window.nx.elegirCarpeta(); if(r){ $('sdRoot').textContent=r; $('sdRoot').dataset.modo='sd'; } };
+  $('bZip').onclick=async()=>{ const r=await window.nx.elegirZip(carpeta($('titulo').value.trim()||'juego')+'.zip'); if(r){ $('sdRoot').textContent=r; $('sdRoot').dataset.modo='zip'; } }; }
 async function sdModo(zip,d){
-  const root=$('sdRoot').textContent.trim(); if(!window.nx||!root) return false;
+  const root=$('sdRoot').textContent.trim(), modo=$('sdRoot').dataset.modo; if(!window.nx||!root||!modo) return false;
+  const nx=window.nx, ex=destinosExtras(d);
+  if(modo==='zip'){
+    log('Armando '+root+' ...'); await nx.zipIniciar(root);
+    for(const n of Object.keys(zip.files)){ const e=zip.files[n]; if(e.dir) continue; await nx.zipBuffer(n,await e.async('uint8array')); }
+    for(const x of ex){ log('Agregando '+x.f.name+'...'); await nx.zipArchivo(nx.rutaDe(x.f),x.dest); }
+    await nx.zipFin(); log('LISTO: '+root+' (trae las carpetas switch y tico). Descomprímelo y arrastra switch y tico a la raíz de la SD.');
+    return true;
+  }
   log('Copiando a '+root+' ...');
-  for(const n of Object.keys(zip.files)){ const e=zip.files[n]; if(e.dir) continue; await window.nx.escribir(root,n,await e.async('uint8array')); }
-  for(const x of destinosExtras(d)){ log('Copiando '+x.f.name+'...'); await window.nx.copiar(window.nx.rutaDe(x.f),root,x.dest); }
+  for(const n of Object.keys(zip.files)){ const e=zip.files[n]; if(e.dir) continue; await nx.escribir(root,n,await e.async('uint8array')); }
+  for(const x of ex){ log('Copiando '+x.f.name+'...'); await nx.copiar(nx.rutaDe(x.f),root,x.dest); }
   log('LISTO: todo quedó en '+root+' (carpetas switch y tico). Ya puedes sacar la SD.');
   return true;
 }
