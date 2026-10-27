@@ -73,6 +73,15 @@ details summary{cursor:pointer;color:var(--mu);font-size:.9rem;margin-top:10px}
 </details>
 <label for="cover">Portada (se recorta a 256x256 desde arriba)</label>
 <div class="row"><input id="cover" type="file" accept="image/*"><canvas id="prev" width="256" height="256"></canvas></div>
+<details><summary>Incluir el juego, el núcleo y la BIOS dentro del zip (opcional)</summary>
+<p class="mu">Así solo descomprimes y arrastras <b>switch</b> y <b>tico</b> a la SD. Los archivos se quedan en tu equipo: se meten al zip aquí mismo, no se suben a internet. Funciona bien hasta ~1.8 GB en total; si es más, cópialos a mano.</p>
+<label for="incGame">Juego (todos sus archivos, ej. .cue + .bin)</label>
+<input id="incGame" type="file" multiple>
+<label for="incCore">Núcleo (tico-*.nro, solo consolas con Tico)</label>
+<input id="incCore" type="file" accept=".nro">
+<label for="incBios">BIOS (si la consola la pide)</label>
+<input id="incBios" type="file" multiple>
+</details>
 <label for="autor">Autor</label>
 <input id="autor" type="text" value="grupo NX masters">
 <label for="cred">Créditos (uno por línea)</label>
@@ -282,13 +291,26 @@ async function explicarFallo(run){
     for(const j of js){ const p=(j.steps||[]).find(s=>s.conclusion==='failure'); log('Falló el trabajo "'+j.name+'"'+(p?' en el paso "'+p.name+'"':'')+'.'); } }catch(e){}
   log('Abre '+run.html_url+' y mándale una captura del paso rojo a Claude.');
 }
+function agregarExtras(zip,d){
+  const g=[...$('incGame').files], c=[...$('incCore').files], b=[...$('incBios').files];
+  const total=[...g,...c,...b].reduce((a,f)=>a+f.size,0);
+  if(!total) return;
+  if(total>1.8e9){ log('AVISO: los archivos extra pesan '+(total/1e9).toFixed(1)+' GB, demasiado para armar en el navegador. Se omiten: cópialos a mano.'); return; }
+  const gdir=P.tipo==='build'?'switch/nxmasters/games/':P.tipo==='wiiu'?'switch/cemu/games/':d.ruta.replace('sdmc:/','').replace(/[^\/]*$/,'');
+  const add=(path,f)=>zip.file(path,f,{compression:'STORE'});
+  for(const f of g) add(gdir+f.name,f);
+  if(g.length&&!g.some(f=>f.name===d.iso)) log('AVISO: ninguno de los archivos del juego se llama "'+d.iso+'" (el nombre que pusiste arriba). El lanzador busca ese nombre exacto.');
+  if(P.tipo==='tico') for(const f of c) add('switch/nxmasters/cores/'+f.name,f);
+  if(P.tipo!=='wiiu') for(const f of b) add('switch/nxmasters/bios/'+f.name,f);
+  log('Incluidos en el zip: '+g.length+' juego(s), '+c.length+' núcleo(s), '+b.length+' BIOS.');
+}
 async function armarZip(d,blobZip){
   const inner=await JSZip.loadAsync(await blobZip.arrayBuffer());
   if(P.tipo==='wiiu'){
     const cardName=Object.keys(inner.files).find(n=>/\.zip$/i.test(n)); if(!cardName) throw new Error('El resultado no trae el zip del juego');
     const card=await JSZip.loadAsync(await inner.files[cardName].async('uint8array')), z2=new JSZip(), f2=carpeta(d.titulo);
     for(const n of Object.keys(card.files)){ const e=card.files[n]; if(e.dir) continue; z2.file(n,await e.async('uint8array')); }
-    z2.file('INSTRUCCIONES - '+f2+'.txt',instrucciones(d)); z2.file('CREDITS.txt',textoCreditos(d));
+    z2.file('INSTRUCCIONES - '+f2+'.txt',instrucciones(d)); z2.file('CREDITS.txt',textoCreditos(d)); agregarExtras(z2,d);
     const out2=await z2.generateAsync({type:'blob',compression:'DEFLATE'});
     const b2=document.createElement('button'); b2.textContent='Descargar '+f2+'.zip'; $('dl').innerHTML=''; $('dl').appendChild(b2);
     const dl2=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(out2);a.download=f2+'.zip';a.click();};
@@ -303,7 +325,7 @@ async function armarZip(d,blobZip){
   } else {
     z.file(d.ruta.replace('sdmc:/','')+'.LEEME.txt','Pon aqui tu juego con este nombre exacto:\n'+d.ruta+'\n');
   }
-  z.file('INSTRUCCIONES - '+f+'.txt',instrucciones(d)); z.file('CREDITS.txt',textoCreditos(d));
+  z.file('INSTRUCCIONES - '+f+'.txt',instrucciones(d)); z.file('CREDITS.txt',textoCreditos(d)); agregarExtras(z,d);
   const out=await z.generateAsync({type:'blob',compression:'DEFLATE'});
   const b=document.createElement('button'); b.textContent='Descargar '+f+'.zip'; $('dl').innerHTML=''; $('dl').appendChild(b);
   const dlf=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=f+'.zip';a.click();};
