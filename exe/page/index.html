@@ -274,7 +274,7 @@ async function crearRama(d){
     const conf='# Generado por el Creador NX masters\nROOT_NAME='+sl+'\nAPP_NAME="'+d.titulo+'"\nAPP_AUTHOR="'+d.autor+'"\nAPP_ICON=cemu-games/'+sl+'.jpg\nGAME_PATH="'+d.ruta+'"\nGAME_PATH_ALT=\n';
     await blob('cemu-games-extra/'+sl+'.conf',conf); await blob('cemu-games-extra/'+sl+'.jpg',iconB64,'base64');
   } else {
-    const hdr='#define FWD_CORE '+cstr(P.core)+'\n#define FWD_SLUG '+cstr(P.slug)+'\n#define FWD_ROM '+cstr(d.ruta)+'\n#define FWD_TITLE '+cstr(d.titulo)+'\n#define FWD_MODE 0\n';
+    const hdr='#define FWD_CORE '+cstr(P.core)+'\n#define FWD_SLUG '+cstr(P.slug)+'\n#define FWD_ROM '+cstr(d.ruta)+'\n#define FWD_TITLE '+cstr(d.titulo)+'\n#define FWD_MODE 0\n#define FWD_AUTHOR '+cstr(d.autor)+'\n';
     await blob('fwd/fixed.h',hdr); await blob('fwd/app.cfg','TITLE='+d.titulo+'\nAUTHOR='+d.autor+'\n');
     if(iconB64) await blob('fwd/icon.jpg',iconB64,'base64');
   }
