@@ -13,7 +13,7 @@
   "build": {
     "appId": "com.nxmasters.creador",
     "productName": "NX masters Creador",
-    "files": ["main.js", "page/**"],
+    "files": ["main.js", "preload.js", "page/**"],
     "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "artifactName": "NXmasters-Creador.exe" },
     "forceCodeSigning": false
   }
