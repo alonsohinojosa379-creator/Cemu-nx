@@ -314,11 +314,11 @@ function destinosExtras(d){
   if(P.tipo!=='wiiu') for(const f of bi) out.push({f,dest:'switch/nxmasters/bios/'+f.name});
   return out;
 }
-function agregarExtras(zip,d){
+async function agregarExtras(zip,d){
   const ex=destinosExtras(d); if(!ex.length) return;
   const total=ex.reduce((a,x)=>a+x.f.size,0);
   if(total>1.8e9){ log('AVISO: los archivos extra pesan '+(total/1e9).toFixed(1)+' GB, demasiado para armar en el navegador. Se omiten: cópialos a mano.'); return; }
-  for(const x of ex) zip.file(x.dest,x.f,{compression:'STORE'});
+  for(const x of ex){ const data=x.f._p ? await window.nx.leer(x.f._p) : x.f; zip.file(x.dest,data,{compression:'STORE'}); }
   log('Incluidos en el zip: '+ex.length+' archivo(s) extra.');
 }
 // App de PC: escribe todo directo en la carpeta elegida (SD)
@@ -346,7 +346,7 @@ async function armarZip(d,blobZip){
     const cardName=Object.keys(inner.files).find(n=>/\.zip$/i.test(n)); if(!cardName) throw new Error('El resultado no trae el zip del juego');
     const card=await JSZip.loadAsync(await inner.files[cardName].async('uint8array')), z2=new JSZip(), f2=carpeta(d.titulo);
     for(const n of Object.keys(card.files)){ const e=card.files[n]; if(e.dir) continue; z2.file(n,await e.async('uint8array')); }
-    z2.file('INSTRUCCIONES - '+f2+'.txt',instrucciones(d)); z2.file('CREDITS.txt',textoCreditos(d)); if(await sdModo(z2,d)) return; agregarExtras(z2,d);
+    z2.file('INSTRUCCIONES - '+f2+'.txt',instrucciones(d)); z2.file('CREDITS.txt',textoCreditos(d)); if(await sdModo(z2,d)) return; await agregarExtras(z2,d);
     const out2=await z2.generateAsync({type:'blob',compression:'DEFLATE'});
     const b2=document.createElement('button'); b2.textContent='Descargar '+f2+'.zip'; $('dl').innerHTML=''; $('dl').appendChild(b2);
     const dl2=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(out2);a.download=f2+'.zip';a.click();};
@@ -361,7 +361,7 @@ async function armarZip(d,blobZip){
   } else {
     z.file(d.ruta.replace('sdmc:/','')+'.LEEME.txt','Pon aqui tu juego con este nombre exacto:\n'+d.ruta+'\n');
   }
-  z.file('INSTRUCCIONES - '+f+'.txt',instrucciones(d)); z.file('CREDITS.txt',textoCreditos(d)); if(await sdModo(z,d)) return; agregarExtras(z,d);
+  z.file('INSTRUCCIONES - '+f+'.txt',instrucciones(d)); z.file('CREDITS.txt',textoCreditos(d)); if(await sdModo(z,d)) return; await agregarExtras(z,d);
   const out=await z.generateAsync({type:'blob',compression:'DEFLATE'});
   const b=document.createElement('button'); b.textContent='Descargar '+f+'.zip'; $('dl').innerHTML=''; $('dl').appendChild(b);
   const dlf=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=f+'.zip';a.click();};

@@ -30,6 +30,7 @@ ipcMain.handle('nx:copiar', async (_e, src, root, rel) => {
   return true;
 });
 
+ipcMain.handle('nx:leer', async (_e, src) => { const b = await fs.promises.readFile(src); return new Uint8Array(b); });
 ipcMain.handle('nx:elegirZip', async (_e, nombre) => {
   const r = await dialog.showSaveDialog({ title: 'Guardar el zip completo', defaultPath: nombre, filters: [{ name: 'Zip', extensions: ['zip'] }] });
   return r.canceled ? null : r.filePath;
