@@ -173,6 +173,29 @@ async function gh(met,url,body,raw){
   return raw?r:(r.status===204?{}:r.json());
 }
 function guardar(){ try{ localStorage.setItem('nx_tok',$('tok').value.trim()); localStorage.setItem('nx_repo',limpiaRepo($('repo').value)); }catch(e){} }
+const MOTOR=['fwd/main.cpp','launcher/source/forwarder.cpp','launcher/source/forwarder.h','.github/workflows/build.yml','.github/workflows/build-fwd.yml','.github/workflows/wiiu-game.yml','blackops2-wiiu.patch','wiiu-gate/apply.py','wiiu-gate/gate.c','wiiu-gate/Makefile'];
+// Mantiene tu repo al dia: copia del repo base los archivos del motor que cambiaron.
+async function sincronizarMotor(r){
+  const cambios=[];
+  for(const f of MOTOR){
+    let a=null,b=null;
+    try{ a=(await gh('GET','/repos/'+BASE+'/contents/'+f+'?ref=main')).sha; }catch(e){ continue; }
+    try{ b=(await gh('GET','/repos/'+r+'/contents/'+f+'?ref=main')).sha; }catch(e){}
+    if(a!==b) cambios.push({f,sha:a});
+  }
+  if(!cambios.length) return;
+  log('Actualizando el motor de tu repo ('+cambios.length+' archivo(s))...');
+  const R='/repos/'+r, ref=await gh('GET',R+'/git/ref/heads/main'), bc=await gh('GET',R+'/git/commits/'+ref.object.sha);
+  const tree=[];
+  for(const c of cambios){
+    const src=await gh('GET','/repos/'+BASE+'/git/blobs/'+c.sha);
+    const nb=await gh('POST',R+'/git/blobs',{content:src.content.replace(/\n/g,''),encoding:'base64'});
+    tree.push({path:c.f,mode:'100644',type:'blob',sha:nb.sha});
+  }
+  const nt=await gh('POST',R+'/git/trees',{base_tree:bc.tree.sha,tree});
+  const cm=await gh('POST',R+'/git/commits',{message:'Actualizar motor desde el repo base',tree:nt.sha,parents:[ref.object.sha]});
+  await gh('PATCH',R+'/git/refs/heads/main',{sha:cm.sha});
+}
 async function ensureRepo(){
   const u=await gh('GET','/user');
   let r=repo(); if(!r||r===BASE){ r=u.login+'/nxmasters-builds'; $('repo').value=r; }
@@ -187,6 +210,7 @@ async function ensureRepo(){
     if(!ok) throw new Error('Se creó '+r+' pero aún no está listo. Espera un minuto y pulsa de nuevo.');
     await esp(3000);
   }
+  try{ await sincronizarMotor(r); }catch(e){ log('AVISO: no pude actualizar el motor: '+e.message.slice(0,120)); }
   guardar(); return r;
 }
 $('bChk').onclick=async()=>{
