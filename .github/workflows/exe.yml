@@ -4,6 +4,9 @@ name: EXE NX masters (Windows x64)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   exe:
     runs-on: windows-latest
@@ -30,3 +33,11 @@ jobs:
           name: NXmasters-exe
           path: exe/dist/NXmasters-Creador.exe
           retention-days: 14
+      - name: Publicar en Releases (enlace directo para bajar el .exe)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete exe-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create exe-latest exe/dist/NXmasters-Creador.exe --repo "$GITHUB_REPOSITORY" \
+            --title "NX masters Creador (Windows x64)" --notes "App de PC del Creador de NX masters." --latest=false
