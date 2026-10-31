@@ -350,6 +350,10 @@ async function agregarExtras(zip,d){
 if(window.nx){ $('sdBox').style.display='block'; $('bSd').onclick=async()=>{ const r=await window.nx.elegirCarpeta(); if(r){ $('sdRoot').textContent=r; $('sdRoot').dataset.modo='sd'; } };
   $('bZip').onclick=async()=>{ const r=await window.nx.elegirZip(carpeta($('titulo').value.trim()||'juego')+'.zip'); if(r){ $('sdRoot').textContent=r; $('sdRoot').dataset.modo='zip'; } }; }
 async function sdModo(zip,d){
+  if(window.nx && destinosExtras(d).length && (!$('sdRoot').textContent.trim()||!$('sdRoot').dataset.modo)){
+    log('Elige dónde guardar el .zip...');
+    const r=await window.nx.elegirZip(carpeta(d.titulo)+'.zip'); if(r){ $('sdRoot').textContent=r; $('sdRoot').dataset.modo='zip'; }
+  }
   const root=$('sdRoot').textContent.trim(), modo=$('sdRoot').dataset.modo; if(!window.nx||!root||!modo) return false;
   const nx=window.nx, ex=destinosExtras(d), ruta=x=>x.f._p||nx.rutaDe(x.f);
   if(modo==='zip'){
